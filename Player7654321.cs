@@ -16,6 +16,9 @@ namespace Player7654321
         private const int LEFT_ARM_TURRET_ID = 2;
         private const int RIGHT_ARM_TURRET_ID = 3;
         private const int CENTER_ARM_TURRET_ID = 4;
+        private const int ATTACK_ARM_LINK_COUNT = 10;
+        private const float ATTACK_ARM_LINK_THICKNESS = 0.24f;
+        private const float ATTACK_ARM_ZIGZAG_AMPLITUDE = 0.65f;
         private const float MIN_ATTACK_ARM_LENGTH = 3.0f;
         private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
         private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
@@ -50,9 +53,12 @@ namespace Player7654321
         private EnemyTrack[] m_enemyTracks;
         private RotJointPart[] m_rotJointParts = new RotJointPart[0];
         private TurretPart[] m_turretParts = new TurretPart[0];
+        private Transform[][] m_attackArmLinks = new Transform[3][];
+        private float[] m_attackArmLengths = { 4.0f, 4.0f, 4.0f };
         private int[] m_targetByTurret = new int[0];
         private float[] m_targetAssignedAt = new float[0];
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
+        private int m_sharedAttackTarget = -1;
         private Vector3 m_position;
         private Quaternion m_rotation;
         private float m_legExtensionStartedAt;
@@ -62,6 +68,7 @@ namespace Player7654321
             m_legExtensionStartedAt = Time.time;
             GetRotJoints(CacheRotJointReferences);
             GetTurrets(CacheTurretReferences);
+            InitializeAttackArmLinks();
         }
 
         private void Update()
@@ -128,19 +135,21 @@ namespace Player7654321
                 return;
             }
 
-            Transform armSegment = attackJoint.transform.Find("AttackArmSegment");
-            if (armSegment == null) return;
+            Transform[] armLinks = GetAttackArmLinks(jointId);
+            if (armLinks == null) return;
 
             Vector3 targetDirection = transform.InverseTransformDirection(
                 GetPredictedAimPoint(tanks[targetId], targetId) - attackJoint.transform.position);
-            targetDirection.y = 0.0f;
+            float horizontalDistance = new Vector2(targetDirection.x, targetDirection.z).magnitude;
             float distance = targetDirection.magnitude;
             if (distance < 0.001f) return;
 
             float directionAngle = Mathf.Atan2(-targetDirection.x, -targetDirection.z) * Mathf.Rad2Deg;
-            float armLength = Mathf.Clamp(distance - 2.5f, MIN_ATTACK_ARM_LENGTH, MAX_ATTACK_ARM_LENGTH);
+            float pitchAngle = Mathf.Atan2(targetDirection.y, horizontalDistance) * Mathf.Rad2Deg;
+            // 砲塔を相手の中心まで押し込み、3本が同じ場所へ刺さるよう少しだけ奥へ出す。
+            float armLength = Mathf.Clamp(distance + 0.8f, MIN_ATTACK_ARM_LENGTH, MAX_ATTACK_ARM_LENGTH);
             SXG_RotateJointToAngle(jointId, directionAngle);
-            SetAttackArmLength(armSegment, turret.transform, armLength);
+            SetAttackArmLength(jointId, armLinks, turret.transform, armLength, pitchAngle);
         }
 
         private void RetractAttackArm(int jointId, int turretId, float retractAngle)
@@ -153,25 +162,90 @@ namespace Player7654321
             RotJointPart attackJoint = m_rotJointParts[jointId];
             if (attackJoint == null) return;
 
-            Transform armSegment = attackJoint.transform.Find("AttackArmSegment");
-            if (armSegment != null)
-                SetAttackArmLength(armSegment, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH);
+            Transform[] armLinks = GetAttackArmLinks(jointId);
+            if (armLinks != null)
+                SetAttackArmLength(jointId, armLinks, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH, 0.0f);
         }
 
-        private void SetAttackArmLength(Transform armSegment, Transform turretTransform, float targetLength)
+        private void InitializeAttackArmLinks()
         {
-            Vector3 scale = armSegment.localScale;
-            float length = Mathf.MoveTowards(scale.z, targetLength, ATTACK_ARM_EXTENSION_SPEED * Time.deltaTime);
-            scale.z = length;
-            armSegment.localScale = scale;
+            for (int armIndex = 0; armIndex < m_attackArmLinks.Length; armIndex++)
+            {
+                int jointId = LEFT_ATTACK_ARM_JOINT_ID + armIndex;
+                if (jointId >= m_rotJointParts.Length || m_rotJointParts[jointId] == null) continue;
 
-            Vector3 segmentPosition = armSegment.localPosition;
-            segmentPosition.z = -length * 0.5f;
-            armSegment.localPosition = segmentPosition;
+                Transform armRoot = m_rotJointParts[jointId].transform;
+                Transform firstLink = armRoot.Find("AttackArmSegment");
+                if (firstLink == null) continue;
 
-            Vector3 turretPosition = turretTransform.localPosition;
-            turretPosition.z = -length;
-            turretTransform.localPosition = turretPosition;
+                Transform[] links = new Transform[ATTACK_ARM_LINK_COUNT];
+                links[0] = firstLink;
+                Collider firstCollider = firstLink.GetComponent<Collider>();
+                if (firstCollider != null) firstCollider.enabled = false;
+
+                for (int linkIndex = 1; linkIndex < links.Length; linkIndex++)
+                {
+                    GameObject linkObject = Instantiate(firstLink.gameObject, armRoot);
+                    linkObject.name = "AttackArmLink_" + linkIndex;
+                    Transform link = linkObject.transform;
+                    link.localPosition = Vector3.zero;
+                    link.localRotation = Quaternion.identity;
+                    link.localScale = new Vector3(ATTACK_ARM_LINK_THICKNESS, ATTACK_ARM_LINK_THICKNESS, 1.0f);
+                    Collider linkCollider = linkObject.GetComponent<Collider>();
+                    if (linkCollider != null) linkCollider.enabled = false;
+                    links[linkIndex] = link;
+                }
+
+                m_attackArmLinks[armIndex] = links;
+                m_attackArmLengths[armIndex] = Mathf.Max(firstLink.localScale.z, MIN_ATTACK_ARM_LENGTH);
+            }
+        }
+
+        private Transform[] GetAttackArmLinks(int jointId)
+        {
+            int armIndex = jointId - LEFT_ATTACK_ARM_JOINT_ID;
+            if (armIndex < 0 || armIndex >= m_attackArmLinks.Length) return null;
+            return m_attackArmLinks[armIndex];
+        }
+
+        private void SetAttackArmLength(int jointId, Transform[] links, Transform turretTransform, float targetLength, float pitchAngle)
+        {
+            int armIndex = jointId - LEFT_ATTACK_ARM_JOINT_ID;
+            if (armIndex < 0 || armIndex >= m_attackArmLengths.Length || links == null || links.Length == 0) return;
+
+            float length = Mathf.MoveTowards(m_attackArmLengths[armIndex], targetLength, ATTACK_ARM_EXTENSION_SPEED * Time.deltaTime);
+            m_attackArmLengths[armIndex] = length;
+
+            float pitchRadians = pitchAngle * Mathf.Deg2Rad;
+            Vector3 forward = new Vector3(0.0f, Mathf.Sin(pitchRadians), -Mathf.Cos(pitchRadians));
+            int linkCount = links.Length;
+            for (int linkIndex = 0; linkIndex < linkCount; linkIndex++)
+            {
+                Vector3 start = GetAttackArmPoint(linkIndex, linkCount, length, forward, armIndex);
+                Vector3 end = GetAttackArmPoint(linkIndex + 1, linkCount, length, forward, armIndex);
+                Vector3 linkDirection = end - start;
+                Transform link = links[linkIndex];
+                if (link == null || linkDirection.sqrMagnitude < 0.0001f) continue;
+
+                link.localPosition = (start + end) * 0.5f;
+                link.localRotation = Quaternion.FromToRotation(Vector3.back, linkDirection.normalized);
+                link.localScale = new Vector3(ATTACK_ARM_LINK_THICKNESS, ATTACK_ARM_LINK_THICKNESS, linkDirection.magnitude);
+            }
+
+            turretTransform.localPosition = forward * length;
+        }
+
+        private Vector3 GetAttackArmPoint(int pointIndex, int linkCount, float length, Vector3 forward, int armIndex)
+        {
+            float progress = (float)pointIndex / linkCount;
+            float offset = 0.0f;
+            if (pointIndex > 0 && pointIndex < linkCount)
+            {
+                float side = ((pointIndex + armIndex) % 2 == 0) ? 1.0f : -1.0f;
+                offset = side * ATTACK_ARM_ZIGZAG_AMPLITUDE * Mathf.Sin(progress * Mathf.PI);
+            }
+
+            return forward * (length * progress) + Vector3.right * offset;
         }
 
         private void CacheRotJointReferences(RotJointPart[] joints)
@@ -192,14 +266,26 @@ namespace Player7654321
             EnsureTurretTargets(turretCount);
 
             m_assignedTargets.Clear();
+            if (!IsTargetable(tanks, m_sharedAttackTarget))
+                m_sharedAttackTarget = FindBestTarget(tanks, null);
+
             for (int turretId = 0; turretId < turretCount; turretId++)
             {
-                int targetId = m_targetByTurret[turretId];
-                if (!IsTargetable(tanks, targetId) || m_assignedTargets.Contains(targetId))
+                int targetId;
+                if (IsAttackArmTurret(turretId))
                 {
-                    targetId = FindBestTarget(tanks, m_assignedTargets);
-                    if (targetId < 0)
-                        targetId = FindBestTarget(tanks, null);
+                    // 3本の腕は同じ敵の中心へ集中させ、砲塔をまとめて突き刺す。
+                    targetId = m_sharedAttackTarget;
+                }
+                else
+                {
+                    targetId = m_targetByTurret[turretId];
+                    if (!IsTargetable(tanks, targetId) || m_assignedTargets.Contains(targetId))
+                    {
+                        targetId = FindBestTarget(tanks, m_assignedTargets);
+                        if (targetId < 0)
+                            targetId = FindBestTarget(tanks, null);
+                    }
                 }
 
                 if (targetId != m_targetByTurret[turretId])
@@ -233,6 +319,13 @@ namespace Player7654321
                     m_enemyTracks[targetId] = track;
                 }
             }
+        }
+
+        private bool IsAttackArmTurret(int turretId)
+        {
+            return turretId == LEFT_ARM_TURRET_ID
+                || turretId == RIGHT_ARM_TURRET_ID
+                || turretId == CENTER_ARM_TURRET_ID;
         }
 
         private bool IsTargetable(TankInfo[] tanks, int targetId)
