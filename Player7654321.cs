@@ -5,8 +5,7 @@ using SXG2025;
 namespace Player7654321
 {
     /// <summary>
-    /// 開始時に脚を伸ばして高さを取り、その後は真下へ撃った砲弾の反動で上昇する機体。
-    /// 下方の敵を狙えるときだけ照準を少し動かし、それ以外は砲口を真下に保つ。
+    /// Sample06のように脚を伸ばして高所を取り、全砲門を敵へ向けて攻撃する機体。
     /// </summary>
     public class Player7654321 : ComPlayerBase
     {
@@ -16,17 +15,14 @@ namespace Player7654321
         private const float MAX_LEAD_TIME = 1.5f;
         private const float VELOCITY_SMOOTHING = 0.55f;
         private const float LEG_EXTENSION_TIME = 4.0f;
+        private const float TURRET_AIM_SETTLE_TIME = 1.25f;
         private static readonly float[] s_standUpJointAngles =
         {
             -160.0f, -160.0f, 160.0f, 160.0f,
             170.0f, 170.0f, -170.0f, -170.0f
         };
 
-        // 砲口は砲塔基部よりおよそ3m下にある。敵がこの位置より低く、
-        // 真下から一定角度以内にいる場合だけ、空中からの攻撃対象にする。
-        [Header("上空からの射撃")]
-        [SerializeField, Range(5.0f, 60.0f)] private float m_maxDownAimAngle = 38.0f;
-        [SerializeField, Min(0.0f)] private float m_muzzleDropEstimate = 3.0f;
+        [Header("照準")]
         [SerializeField] private float m_coreAimHeight = -0.35f;
 
         [Header("場外からの復帰")]
@@ -43,6 +39,7 @@ namespace Player7654321
 
         private EnemyTrack[] m_enemyTracks;
         private int[] m_targetByTurret = new int[0];
+        private float[] m_targetAssignedAt = new float[0];
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
         private Vector3 m_position;
         private Quaternion m_rotation;
@@ -83,10 +80,7 @@ namespace Player7654321
             }
         }
 
-        /// <summary>
-        /// 全砲門を真下へ向け、撃てる砲門から発射する。
-        /// 反動の向きを上向きにそろえ、1門の不調で残りの砲門まで止まらないようにする。
-        /// </summary>
+        /// <summary>敵を砲門ごとに割り当て、照準が追いついた砲門から発射する。</summary>
         private void AimAndFireVolley(TankInfo[] tanks)
         {
             int turretCount = SXG_GetCountOfMyTurrets();
@@ -96,69 +90,55 @@ namespace Player7654321
             m_assignedTargets.Clear();
             for (int turretId = 0; turretId < turretCount; turretId++)
             {
-                // 基本姿勢は真下。狙える敵が機体より下にいるときだけ照準を上書きする。
-                SXG_RotateTurretToAngle(turretId, 0.0f, 0.0f);
-
                 int targetId = m_targetByTurret[turretId];
-                if (!CanAimAtEnemyFromAbove(tanks, targetId))
+                if (!IsTargetable(tanks, targetId) || m_assignedTargets.Contains(targetId))
                 {
                     targetId = FindBestTarget(tanks, m_assignedTargets);
                     if (targetId < 0)
                         targetId = FindBestTarget(tanks, null);
                 }
 
+                if (targetId != m_targetByTurret[turretId])
+                    m_targetAssignedAt[turretId] = Time.time;
+
                 m_targetByTurret[turretId] = targetId;
-                if (targetId < 0) continue;
+                if (targetId < 0)
+                {
+                    SXG_RotateTurretToAngle(turretId, 0.0f, 0.0f);
+                    continue;
+                }
 
                 m_assignedTargets.Add(targetId);
                 Vector3 impactPoint = GetPredictedAimPoint(tanks[targetId], targetId);
-                if (IsWithinDownwardAttackCone(impactPoint))
-                {
-                    SXG_RotateTurretToImpactPoint(turretId, impactPoint);
-                }
-                else
-                {
-                    // 敵が横や上にいる間は真下を維持し、反動を横向きに逃がさない。
-                    m_targetByTurret[turretId] = -1;
-                }
+                SXG_RotateTurretToImpactPoint(turretId, impactPoint);
             }
 
-            // 各砲門を個別に確認する。装填中や不調の砲門があっても、使える砲門は撃つ。
+            // 砲塔の最大旋回時間を待ってから撃ち、照準前の初弾が前方へ飛ぶのを防ぐ。
             for (int turretId = 0; turretId < turretCount; turretId++)
             {
-                if (!SXG_CanShoot(turretId)) continue;
                 int targetId = m_targetByTurret[turretId];
+                if (targetId < 0 || !SXG_CanShoot(turretId)) continue;
+                if (Time.time - m_targetAssignedAt[turretId] < TURRET_AIM_SETTLE_TIME) continue;
+
                 SXG_Shoot(turretId);
 
-                if (targetId > 0 && m_enemyTracks != null && targetId < m_enemyTracks.Length)
+                if (m_enemyTracks != null && targetId < m_enemyTracks.Length)
                 {
                     EnemyTrack track = m_enemyTracks[targetId];
                     track.LastEngagedAt = Time.time;
                     m_enemyTracks[targetId] = track;
                 }
-
-                m_targetByTurret[turretId] = -1;
             }
         }
 
-        /// <summary>予測した着弾点が砲口より下で、真下からの角度制限内かを調べる。</summary>
-        private bool IsWithinDownwardAttackCone(Vector3 aimPoint)
-        {
-            Vector3 estimatedMuzzle = m_position + Vector3.down * m_muzzleDropEstimate;
-            Vector3 toTarget = aimPoint - estimatedMuzzle;
-            if (toTarget.y >= 0.0f || toTarget.sqrMagnitude < 0.001f) return false;
-            return Vector3.Angle(Vector3.down, toTarget) <= m_maxDownAimAngle;
-        }
-
-        private bool CanAimAtEnemyFromAbove(TankInfo[] tanks, int targetId)
+        private bool IsTargetable(TankInfo[] tanks, int targetId)
         {
             return tanks != null
                 && targetId > 0
                 && targetId < tanks.Length
                 && targetId < GameConstants.MAX_PLAYER_COUNT_IN_ONE_BATTLE
                 && !tanks[targetId].IsDefeated
-                && !tanks[targetId].IsInvincible
-                && IsWithinDownwardAttackCone(tanks[targetId].Position);
+                && !tanks[targetId].IsInvincible;
         }
 
         /// <summary>高コストの敵を優先し、各砲門に重複しない標的を割り当てる。</summary>
@@ -176,9 +156,6 @@ namespace Player7654321
                 TankInfo enemy = tanks[enemyId];
                 if (enemy.IsDefeated || enemy.IsInvincible) continue;
                 if (alreadyAssigned != null && alreadyAssigned.Contains(enemyId)) continue;
-
-                Vector3 impactPoint = GetPredictedAimPoint(enemy, enemyId);
-                if (!IsWithinDownwardAttackCone(impactPoint)) continue;
 
                 EnemyTrack track = m_enemyTracks[enemyId];
                 float secondsSinceLastShot = now - track.LastEngagedAt;
@@ -322,8 +299,12 @@ namespace Player7654321
             if (m_targetByTurret.Length == turretCount) return;
 
             m_targetByTurret = new int[turretCount];
+            m_targetAssignedAt = new float[turretCount];
             for (int i = 0; i < m_targetByTurret.Length; i++)
+            {
                 m_targetByTurret[i] = -1;
+                m_targetAssignedAt[i] = float.NegativeInfinity;
+            }
         }
 
         private static Vector3 Flatten(Vector3 value)
