@@ -13,8 +13,10 @@ namespace Player7654321
         private const int LEFT_ATTACK_ARM_JOINT_ID = 8;
         private const int RIGHT_ATTACK_ARM_JOINT_ID = 9;
         private const int CENTER_ATTACK_ARM_JOINT_ID = 10;
-        private const int LEFT_ARM_TURRET_ID = 2;
-        private const int RIGHT_ARM_TURRET_ID = 3;
+        // Prefab turret array: Boost_01(ID 2) is mounted on the right arm,
+        // Boost_02(ID 3) is mounted on the left arm.
+        private const int LEFT_ARM_TURRET_ID = 3;
+        private const int RIGHT_ARM_TURRET_ID = 2;
         private const int CENTER_ARM_TURRET_ID = 4;
         private const int ATTACK_ARM_LINK_COUNT = 10;
         private const float ATTACK_ARM_LINK_THICKNESS = 0.24f;
@@ -241,9 +243,10 @@ namespace Player7654321
         {
             if (m_stabilityBody == null) return;
 
-            Collider[] sceneColliders = FindObjectsOfType<Collider>();
-            for (int turretId = LEFT_ARM_TURRET_ID; turretId <= CENTER_ARM_TURRET_ID; turretId++)
+            Collider[] sceneColliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
+            for (int turretId = 0; turretId < m_turretParts.Length; turretId++)
             {
+                if (!IsAttackArmTurret(turretId)) continue;
                 if (turretId >= m_turretParts.Length || m_turretParts[turretId] == null) continue;
 
                 Collider[] armTurretColliders = m_turretParts[turretId].GetComponentsInChildren<Collider>(true);
