@@ -5,7 +5,7 @@ using SXG2025;
 namespace Player7654321
 {
     /// <summary>
-    /// 脚を使わず、真下へ撃った砲弾の反動で上昇する機体。
+    /// 開始時に脚を伸ばして高さを取り、その後は真下へ撃った砲弾の反動で上昇する機体。
     /// 下方の敵を狙えるときだけ照準を少し動かし、それ以外は砲口を真下に保つ。
     /// </summary>
     public class Player7654321 : ComPlayerBase
@@ -15,6 +15,12 @@ namespace Player7654321
         private const float MAX_TARGET_SPEED = 24.0f;
         private const float MAX_LEAD_TIME = 1.5f;
         private const float VELOCITY_SMOOTHING = 0.55f;
+        private const float LEG_EXTENSION_TIME = 4.0f;
+        private static readonly float[] s_standUpJointAngles =
+        {
+            -160.0f, -160.0f, 160.0f, 160.0f,
+            170.0f, 170.0f, -170.0f, -170.0f
+        };
 
         // 砲口は砲塔基部よりおよそ3m下にある。敵がこの位置より低く、
         // 真下から一定角度以内にいる場合だけ、空中からの攻撃対象にする。
@@ -40,6 +46,12 @@ namespace Player7654321
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
         private Vector3 m_position;
         private Quaternion m_rotation;
+        private float m_legExtensionStartedAt;
+
+        private void Start()
+        {
+            m_legExtensionStartedAt = Time.time;
+        }
 
         private void Update()
         {
@@ -52,9 +64,23 @@ namespace Player7654321
                 UpdateEnemyTracks(tanks);
             }
 
+            ExtendLegsForHeight();
+
             // キャタピラは通常止め、外周へ流されたときだけ水平に戻す。
             RecoverFromFieldEdge();
             AimAndFireVolley(tanks);
+        }
+
+        /// <summary>Sample06「アメンボ」のように、4秒かけて8本の脚を伸ばす。</summary>
+        private void ExtendLegsForHeight()
+        {
+            if (SXG_GetCountOfMyRotJoints() != s_standUpJointAngles.Length) return;
+
+            float progress = Mathf.Clamp01((Time.time - m_legExtensionStartedAt) / LEG_EXTENSION_TIME);
+            for (int jointId = 0; jointId < s_standUpJointAngles.Length; jointId++)
+            {
+                SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId] * progress);
+            }
         }
 
         /// <summary>
