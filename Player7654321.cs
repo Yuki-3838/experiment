@@ -5,10 +5,18 @@ using SXG2025;
 namespace Player7654321
 {
     /// <summary>
-    /// Sample06のように脚を伸ばして高所を取り、全砲門を敵へ向けて攻撃する機体。
+    /// Sample06の脚で高所を取り、脚とは別の伸縮式攻撃腕を敵へ伸ばして砲撃する機体。
     /// </summary>
     public class Player7654321 : ComPlayerBase
     {
+        private const int STAND_JOINT_COUNT = 8;
+        private const int LEFT_ATTACK_ARM_JOINT_ID = 8;
+        private const int RIGHT_ATTACK_ARM_JOINT_ID = 9;
+        private const int LEFT_ARM_TURRET_ID = 2;
+        private const int RIGHT_ARM_TURRET_ID = 3;
+        private const float MIN_ATTACK_ARM_LENGTH = 3.0f;
+        private const float MAX_ATTACK_ARM_LENGTH = 20.0f;
+        private const float ATTACK_ARM_EXTENSION_SPEED = 18.0f;
         // DataTank.asset の弾速。敵の移動分を先読みするために使う。
         private const float DEFAULT_SHELL_SPEED = 38.0f;
         private const float MAX_TARGET_SPEED = 24.0f;
@@ -38,6 +46,8 @@ namespace Player7654321
         }
 
         private EnemyTrack[] m_enemyTracks;
+        private RotJointPart[] m_rotJointParts = new RotJointPart[0];
+        private TurretPart[] m_turretParts = new TurretPart[0];
         private int[] m_targetByTurret = new int[0];
         private float[] m_targetAssignedAt = new float[0];
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
@@ -48,6 +58,8 @@ namespace Player7654321
         private void Start()
         {
             m_legExtensionStartedAt = Time.time;
+            GetRotJoints(CacheRotJointReferences);
+            GetTurrets(CacheTurretReferences);
         }
 
         private void Update()
@@ -66,18 +78,107 @@ namespace Player7654321
             // キャタピラは通常止め、外周へ流されたときだけ水平に戻す。
             RecoverFromFieldEdge();
             AimAndFireVolley(tanks);
+            ExtendAttackArms(tanks);
         }
 
         /// <summary>Sample06「アメンボ」のように、4秒かけて8本の脚を伸ばす。</summary>
         private void ExtendLegsForHeight()
         {
-            if (SXG_GetCountOfMyRotJoints() != s_standUpJointAngles.Length) return;
+            if (SXG_GetCountOfMyRotJoints() < STAND_JOINT_COUNT) return;
 
             float progress = Mathf.Clamp01((Time.time - m_legExtensionStartedAt) / LEG_EXTENSION_TIME);
-            for (int jointId = 0; jointId < s_standUpJointAngles.Length; jointId++)
+            for (int jointId = 0; jointId < STAND_JOINT_COUNT; jointId++)
             {
                 SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId] * progress);
             }
+        }
+
+        /// <summary>脚とは別の伸縮式2本腕を、先端砲塔が狙う標的へ伸ばす。</summary>
+        private void ExtendAttackArms(TankInfo[] tanks)
+        {
+            if (m_rotJointParts.Length <= RIGHT_ATTACK_ARM_JOINT_ID) return;
+
+            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, LEFT_ARM_TURRET_ID, 1.0f);
+            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, RIGHT_ARM_TURRET_ID, -1.0f);
+        }
+
+        private void AimAttackArm(TankInfo[] tanks, int jointId, int turretId, float sideSign)
+        {
+            if (turretId < 0 || turretId >= m_targetByTurret.Length || turretId >= m_turretParts.Length)
+            {
+                RetractAttackArm(jointId, turretId, sideSign);
+                return;
+            }
+
+            int targetId = m_targetByTurret[turretId];
+            if (!IsTargetable(tanks, targetId))
+            {
+                RetractAttackArm(jointId, turretId, sideSign);
+                return;
+            }
+
+            RotJointPart attackJoint = m_rotJointParts[jointId];
+            TurretPart turret = m_turretParts[turretId];
+            if (attackJoint == null || turret == null)
+            {
+                RetractAttackArm(jointId, turretId, sideSign);
+                return;
+            }
+
+            Transform armSegment = attackJoint.transform.Find("AttackArmSegment");
+            if (armSegment == null) return;
+
+            Vector3 targetDirection = transform.InverseTransformDirection(
+                GetPredictedAimPoint(tanks[targetId], targetId) - attackJoint.transform.position);
+            targetDirection.y = 0.0f;
+            float distance = targetDirection.magnitude;
+            if (distance < 0.001f) return;
+
+            float directionAngle = Mathf.Atan2(-targetDirection.x, -targetDirection.z) * Mathf.Rad2Deg;
+            float armLength = Mathf.Clamp(distance - 2.5f, MIN_ATTACK_ARM_LENGTH, MAX_ATTACK_ARM_LENGTH);
+            SXG_RotateJointToAngle(jointId, directionAngle);
+            SetAttackArmLength(armSegment, turret.transform, armLength);
+        }
+
+        private void RetractAttackArm(int jointId, int turretId, float sideSign)
+        {
+            SXG_RotateJointToAngle(jointId, sideSign * 70.0f);
+
+            if (turretId < 0 || turretId >= m_turretParts.Length || m_turretParts[turretId] == null)
+                return;
+
+            RotJointPart attackJoint = m_rotJointParts[jointId];
+            if (attackJoint == null) return;
+
+            Transform armSegment = attackJoint.transform.Find("AttackArmSegment");
+            if (armSegment != null)
+                SetAttackArmLength(armSegment, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH);
+        }
+
+        private void SetAttackArmLength(Transform armSegment, Transform turretTransform, float targetLength)
+        {
+            Vector3 scale = armSegment.localScale;
+            float length = Mathf.MoveTowards(scale.z, targetLength, ATTACK_ARM_EXTENSION_SPEED * Time.deltaTime);
+            scale.z = length;
+            armSegment.localScale = scale;
+
+            Vector3 segmentPosition = armSegment.localPosition;
+            segmentPosition.z = -length * 0.5f;
+            armSegment.localPosition = segmentPosition;
+
+            Vector3 turretPosition = turretTransform.localPosition;
+            turretPosition.z = -length;
+            turretTransform.localPosition = turretPosition;
+        }
+
+        private void CacheRotJointReferences(RotJointPart[] joints)
+        {
+            m_rotJointParts = joints ?? new RotJointPart[0];
+        }
+
+        private void CacheTurretReferences(TurretPart[] turrets)
+        {
+            m_turretParts = turrets ?? new TurretPart[0];
         }
 
         /// <summary>敵を砲門ごとに割り当て、照準が追いついた砲門から発射する。</summary>
