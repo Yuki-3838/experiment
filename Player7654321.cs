@@ -38,14 +38,9 @@ namespace Player7654321
         }
 
         private EnemyTrack[] m_enemyTracks;
-        private RotJointPart[] m_rotJointParts = new RotJointPart[0];
-        private Quaternion[] m_jointBaseRotations = new Quaternion[0];
-        private int[] m_parentJointByArm = new int[0];
-        private int[] m_targetByArm = new int[0];
         private int[] m_targetByTurret = new int[0];
         private float[] m_targetAssignedAt = new float[0];
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
-        private readonly HashSet<int> m_assignedArmTargets = new HashSet<int>();
         private Vector3 m_position;
         private Quaternion m_rotation;
         private float m_legExtensionStartedAt;
@@ -53,7 +48,6 @@ namespace Player7654321
         private void Start()
         {
             m_legExtensionStartedAt = Time.time;
-            GetRotJoints(CacheRotJointReferences);
         }
 
         private void Update()
@@ -67,7 +61,7 @@ namespace Player7654321
                 UpdateEnemyTracks(tanks);
             }
 
-            ExtendLegsForHeight(tanks);
+            ExtendLegsForHeight();
 
             // キャタピラは通常止め、外周へ流されたときだけ水平に戻す。
             RecoverFromFieldEdge();
@@ -75,132 +69,14 @@ namespace Player7654321
         }
 
         /// <summary>Sample06「アメンボ」のように、4秒かけて8本の脚を伸ばす。</summary>
-        private void ExtendLegsForHeight(TankInfo[] tanks)
+        private void ExtendLegsForHeight()
         {
             if (SXG_GetCountOfMyRotJoints() != s_standUpJointAngles.Length) return;
 
             float progress = Mathf.Clamp01((Time.time - m_legExtensionStartedAt) / LEG_EXTENSION_TIME);
-            for (int jointId = 0; jointId < 4; jointId++)
+            for (int jointId = 0; jointId < s_standUpJointAngles.Length; jointId++)
             {
                 SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId] * progress);
-            }
-
-            if (progress < 1.0f)
-            {
-                for (int jointId = 4; jointId < s_standUpJointAngles.Length; jointId++)
-                    SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId] * progress);
-                return;
-            }
-
-            AimAppendagesAtEnemies(tanks);
-        }
-
-        /// <summary>脚の根元で高さを保ち、先端側の長い関節を敵へ向ける。</summary>
-        private void AimAppendagesAtEnemies(TankInfo[] tanks)
-        {
-            if (tanks == null || m_rotJointParts.Length != s_standUpJointAngles.Length) return;
-
-            m_assignedArmTargets.Clear();
-            for (int jointId = 4; jointId < m_rotJointParts.Length; jointId++)
-            {
-                RotJointPart armJoint = m_rotJointParts[jointId];
-                int parentId = jointId < m_parentJointByArm.Length ? m_parentJointByArm[jointId] : -1;
-                if (armJoint == null || parentId < 0 || parentId >= m_rotJointParts.Length)
-                {
-                    SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId]);
-                    continue;
-                }
-
-                Transform armFrame = m_rotJointParts[parentId].transform;
-                int targetId = m_targetByArm[jointId];
-                if (!IsTargetable(tanks, targetId) || m_assignedArmTargets.Contains(targetId))
-                    targetId = FindBestArmTarget(tanks, m_assignedArmTargets, armFrame, armJoint.transform.position);
-                if (targetId < 0)
-                    targetId = FindBestArmTarget(tanks, null, armFrame, armJoint.transform.position);
-                m_targetByArm[jointId] = targetId;
-                if (targetId < 0)
-                {
-                    SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId]);
-                    continue;
-                }
-
-                m_assignedArmTargets.Add(targetId);
-                Vector3 targetPosition = GetPredictedAimPoint(tanks[targetId], targetId);
-                Vector3 directionInParent = armFrame.InverseTransformDirection(targetPosition - armJoint.transform.position);
-                Vector3 directionInBase = Quaternion.Inverse(m_jointBaseRotations[jointId]) * directionInParent;
-                directionInBase.y = 0.0f;
-
-                if (directionInBase.sqrMagnitude < 0.0001f)
-                {
-                    SXG_RotateJointToAngle(jointId, s_standUpJointAngles[jointId]);
-                    continue;
-                }
-
-                // このジョイントの子パーツはローカルの後方(-Z)へ伸びる。
-                float targetAngle = Mathf.Atan2(-directionInBase.x, -directionInBase.z) * Mathf.Rad2Deg;
-                SXG_RotateJointToAngle(jointId, targetAngle);
-            }
-        }
-
-        private int FindBestArmTarget(TankInfo[] tanks, HashSet<int> alreadyAssigned, Transform armFrame, Vector3 jointPosition)
-        {
-            if (tanks == null || m_enemyTracks == null) return -1;
-
-            int bestId = -1;
-            float bestScore = float.NegativeInfinity;
-            int count = Mathf.Min(tanks.Length, GameConstants.MAX_PLAYER_COUNT_IN_ONE_BATTLE);
-            float now = Time.time;
-
-            for (int enemyId = 1; enemyId < count; enemyId++)
-            {
-                TankInfo enemy = tanks[enemyId];
-                if (enemy.IsDefeated || enemy.IsInvincible) continue;
-                if (alreadyAssigned != null && alreadyAssigned.Contains(enemyId)) continue;
-
-                Vector3 localDirection = armFrame.InverseTransformDirection(enemy.Position - jointPosition);
-                float distance = localDirection.magnitude;
-                if (distance < 0.001f) continue;
-
-                // 回転軸に近い方向ほど、腕のスイング面で相手まで伸ばしやすい。
-                float outOfPlane = Mathf.Abs(localDirection.y) / distance;
-                EnemyTrack track = m_enemyTracks[enemyId];
-                float recentShotBonus = (now - track.LastEngagedAt) * 0.03f;
-                float costBonus = Mathf.Clamp(enemy.CostOfOneTank, 0, 3000) * 0.003f;
-                float distancePenalty = distance * 0.01f;
-                float score = recentShotBonus + costBonus - distancePenalty - outOfPlane * 8.0f;
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestId = enemyId;
-                }
-            }
-
-            return bestId;
-        }
-
-        private void CacheRotJointReferences(RotJointPart[] joints)
-        {
-            m_rotJointParts = joints ?? new RotJointPart[0];
-            m_jointBaseRotations = new Quaternion[m_rotJointParts.Length];
-            m_parentJointByArm = new int[m_rotJointParts.Length];
-            m_targetByArm = new int[m_rotJointParts.Length];
-
-            for (int jointId = 0; jointId < m_rotJointParts.Length; jointId++)
-            {
-                RotJointPart joint = m_rotJointParts[jointId];
-                m_jointBaseRotations[jointId] = joint != null ? joint.transform.localRotation : Quaternion.identity;
-                m_parentJointByArm[jointId] = -1;
-                m_targetByArm[jointId] = -1;
-
-                if (jointId < 4 || joint == null) continue;
-                for (int parentId = 0; parentId < 4; parentId++)
-                {
-                    if (m_rotJointParts[parentId] != null && joint.transform.IsChildOf(m_rotJointParts[parentId].transform))
-                    {
-                        m_parentJointByArm[jointId] = parentId;
-                        break;
-                    }
-                }
             }
         }
 
