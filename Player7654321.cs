@@ -10,9 +10,9 @@ namespace Player7654321
     public class Player7654321 : ComPlayerBase
     {
         private const int STAND_JOINT_COUNT = 8;
-        private const int LEFT_ATTACK_ARM_JOINT_ID = 8;
-        private const int RIGHT_ATTACK_ARM_JOINT_ID = 9;
-        private const int CENTER_ATTACK_ARM_JOINT_ID = 10;
+        private const int DEFAULT_LEFT_ATTACK_ARM_JOINT_ID = 8;
+        private const int DEFAULT_RIGHT_ATTACK_ARM_JOINT_ID = 9;
+        private const int DEFAULT_CENTER_ATTACK_ARM_JOINT_ID = 10;
         // GetTurrets() array indices used if the inspector references are unset.
         private const int DEFAULT_LEFT_ARM_TURRET_ID = 3;
         private const int DEFAULT_RIGHT_ARM_TURRET_ID = 2;
@@ -45,6 +45,11 @@ namespace Player7654321
         [Header("照準")]
         [SerializeField] private float m_coreAimHeight = -0.35f;
 
+        [Header("攻撃アームのジョイント")]
+        [SerializeField] private RotJointPart m_leftAttackArmJoint;
+        [SerializeField] private RotJointPart m_rightAttackArmJoint;
+        [SerializeField] private RotJointPart m_centerAttackArmJoint;
+
         [Header("攻撃アームの砲塔")]
         [SerializeField] private TurretPart m_leftArmTurret;
         [SerializeField] private TurretPart m_rightArmTurret;
@@ -65,6 +70,9 @@ namespace Player7654321
         private EnemyTrack[] m_enemyTracks;
         private RotJointPart[] m_rotJointParts = new RotJointPart[0];
         private TurretPart[] m_turretParts = new TurretPart[0];
+        private int m_leftAttackArmJointId = DEFAULT_LEFT_ATTACK_ARM_JOINT_ID;
+        private int m_rightAttackArmJointId = DEFAULT_RIGHT_ATTACK_ARM_JOINT_ID;
+        private int m_centerAttackArmJointId = DEFAULT_CENTER_ATTACK_ARM_JOINT_ID;
         private int m_leftArmTurretId = DEFAULT_LEFT_ARM_TURRET_ID;
         private int m_rightArmTurretId = DEFAULT_RIGHT_ARM_TURRET_ID;
         private int m_centerArmTurretId = DEFAULT_CENTER_ARM_TURRET_ID;
@@ -93,6 +101,7 @@ namespace Player7654321
             }
             GetRotJoints(CacheRotJointReferences);
             GetTurrets(CacheTurretReferences);
+            ResolveAttackArmJointIds();
             ResolveAttackArmTurretIds();
             m_nextShotTurret = m_leftArmTurretId;
             InitializeAttackArmLinks();
@@ -150,25 +159,27 @@ namespace Player7654321
         /// <summary>脚とは別の伸縮式3本腕を、先端砲塔が狙う標的へ伸ばす。</summary>
         private void ExtendAttackArms(TankInfo[] tanks)
         {
-            if (m_rotJointParts.Length <= CENTER_ATTACK_ARM_JOINT_ID) return;
+            if (!IsValidAttackArmJointId(m_leftAttackArmJointId)
+                || !IsValidAttackArmJointId(m_rightAttackArmJointId)
+                || !IsValidAttackArmJointId(m_centerAttackArmJointId)) return;
 
-            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, m_leftArmTurretId, 70.0f);
-            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, m_rightArmTurretId, -70.0f);
-            AimAttackArm(tanks, CENTER_ATTACK_ARM_JOINT_ID, m_centerArmTurretId, 180.0f);
+            AimAttackArm(tanks, 0, m_leftAttackArmJointId, m_leftArmTurretId, 70.0f);
+            AimAttackArm(tanks, 1, m_rightAttackArmJointId, m_rightArmTurretId, -70.0f);
+            AimAttackArm(tanks, 2, m_centerAttackArmJointId, m_centerArmTurretId, 180.0f);
         }
 
-        private void AimAttackArm(TankInfo[] tanks, int jointId, int turretId, float retractAngle)
+        private void AimAttackArm(TankInfo[] tanks, int armIndex, int jointId, int turretId, float retractAngle)
         {
             if (turretId < 0 || turretId >= m_targetByTurret.Length || turretId >= m_turretParts.Length)
             {
-                RetractAttackArm(jointId, turretId, retractAngle);
+                RetractAttackArm(armIndex, jointId, turretId, retractAngle);
                 return;
             }
 
             int targetId = m_targetByTurret[turretId];
             if (!IsTargetable(tanks, targetId))
             {
-                RetractAttackArm(jointId, turretId, retractAngle);
+                RetractAttackArm(armIndex, jointId, turretId, retractAngle);
                 return;
             }
 
@@ -176,11 +187,11 @@ namespace Player7654321
             TurretPart turret = m_turretParts[turretId];
             if (attackJoint == null || turret == null)
             {
-                RetractAttackArm(jointId, turretId, retractAngle);
+                RetractAttackArm(armIndex, jointId, turretId, retractAngle);
                 return;
             }
 
-            Transform[] armLinks = GetAttackArmLinks(jointId);
+            Transform[] armLinks = GetAttackArmLinks(armIndex);
             if (armLinks == null) return;
 
             Vector3 targetDirection = transform.InverseTransformDirection(
@@ -194,10 +205,10 @@ namespace Player7654321
             // 砲塔を相手の中心まで押し込み、3本が同じ場所へ刺さるよう少しだけ奥へ出す。
             float armLength = Mathf.Clamp(distance + 0.8f, MIN_ATTACK_ARM_LENGTH, MAX_ATTACK_ARM_LENGTH);
             SXG_RotateJointToAngle(jointId, directionAngle);
-            SetAttackArmLength(jointId, armLinks, turret.transform, armLength, pitchAngle);
+            SetAttackArmLength(armIndex, armLinks, turret.transform, armLength, pitchAngle);
         }
 
-        private void RetractAttackArm(int jointId, int turretId, float retractAngle)
+        private void RetractAttackArm(int armIndex, int jointId, int turretId, float retractAngle)
         {
             SXG_RotateJointToAngle(jointId, retractAngle);
 
@@ -207,17 +218,17 @@ namespace Player7654321
             RotJointPart attackJoint = m_rotJointParts[jointId];
             if (attackJoint == null) return;
 
-            Transform[] armLinks = GetAttackArmLinks(jointId);
+            Transform[] armLinks = GetAttackArmLinks(armIndex);
             if (armLinks != null)
-                SetAttackArmLength(jointId, armLinks, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH, 0.0f);
+                SetAttackArmLength(armIndex, armLinks, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH, 0.0f);
         }
 
         private void InitializeAttackArmLinks()
         {
             for (int armIndex = 0; armIndex < m_attackArmLinks.Length; armIndex++)
             {
-                int jointId = LEFT_ATTACK_ARM_JOINT_ID + armIndex;
-                if (jointId >= m_rotJointParts.Length || m_rotJointParts[jointId] == null) continue;
+                int jointId = GetAttackArmJointId(armIndex);
+                if (!IsValidAttackArmJointId(jointId)) continue;
 
                 Transform armRoot = m_rotJointParts[jointId].transform;
                 Transform firstLink = armRoot.Find("AttackArmSegment");
@@ -272,16 +283,14 @@ namespace Player7654321
             }
         }
 
-        private Transform[] GetAttackArmLinks(int jointId)
+        private Transform[] GetAttackArmLinks(int armIndex)
         {
-            int armIndex = jointId - LEFT_ATTACK_ARM_JOINT_ID;
             if (armIndex < 0 || armIndex >= m_attackArmLinks.Length) return null;
             return m_attackArmLinks[armIndex];
         }
 
-        private void SetAttackArmLength(int jointId, Transform[] links, Transform turretTransform, float targetLength, float pitchAngle)
+        private void SetAttackArmLength(int armIndex, Transform[] links, Transform turretTransform, float targetLength, float pitchAngle)
         {
-            int armIndex = jointId - LEFT_ATTACK_ARM_JOINT_ID;
             if (armIndex < 0 || armIndex >= m_attackArmLengths.Length || links == null || links.Length == 0) return;
 
             float length = Mathf.MoveTowards(m_attackArmLengths[armIndex], targetLength, ATTACK_ARM_EXTENSION_SPEED * Time.deltaTime);
@@ -322,6 +331,41 @@ namespace Player7654321
         private void CacheRotJointReferences(RotJointPart[] joints)
         {
             m_rotJointParts = joints ?? new RotJointPart[0];
+        }
+
+        private void ResolveAttackArmJointIds()
+        {
+            m_leftAttackArmJointId = FindRotJointId(m_leftAttackArmJoint, DEFAULT_LEFT_ATTACK_ARM_JOINT_ID);
+            m_rightAttackArmJointId = FindRotJointId(m_rightAttackArmJoint, DEFAULT_RIGHT_ATTACK_ARM_JOINT_ID);
+            m_centerAttackArmJointId = FindRotJointId(m_centerAttackArmJoint, DEFAULT_CENTER_ATTACK_ARM_JOINT_ID);
+        }
+
+        private int FindRotJointId(RotJointPart selectedJoint, int fallbackId)
+        {
+            if (selectedJoint == null) return fallbackId;
+
+            for (int jointId = 0; jointId < m_rotJointParts.Length; jointId++)
+            {
+                if (m_rotJointParts[jointId] == selectedJoint) return jointId;
+            }
+
+            return fallbackId;
+        }
+
+        private int GetAttackArmJointId(int armIndex)
+        {
+            switch (armIndex)
+            {
+                case 0: return m_leftAttackArmJointId;
+                case 1: return m_rightAttackArmJointId;
+                case 2: return m_centerAttackArmJointId;
+                default: return -1;
+            }
+        }
+
+        private bool IsValidAttackArmJointId(int jointId)
+        {
+            return jointId >= 0 && jointId < m_rotJointParts.Length && m_rotJointParts[jointId] != null;
         }
 
         private void CacheTurretReferences(TurretPart[] turrets)
