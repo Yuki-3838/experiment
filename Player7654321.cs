@@ -13,11 +13,10 @@ namespace Player7654321
         private const int LEFT_ATTACK_ARM_JOINT_ID = 8;
         private const int RIGHT_ATTACK_ARM_JOINT_ID = 9;
         private const int CENTER_ATTACK_ARM_JOINT_ID = 10;
-        // Prefab turret array: Boost_01(ID 2) is mounted on the right arm,
-        // Boost_02(ID 3) is mounted on the left arm.
-        private const int LEFT_ARM_TURRET_ID = 3;
-        private const int RIGHT_ARM_TURRET_ID = 2;
-        private const int CENTER_ARM_TURRET_ID = 4;
+        // GetTurrets() array indices used if the inspector references are unset.
+        private const int DEFAULT_LEFT_ARM_TURRET_ID = 3;
+        private const int DEFAULT_RIGHT_ARM_TURRET_ID = 2;
+        private const int DEFAULT_CENTER_ARM_TURRET_ID = 4;
         private const int ATTACK_ARM_LINK_COUNT = 10;
         private const float ATTACK_ARM_LINK_THICKNESS = 0.24f;
         private const float ATTACK_ARM_ZIGZAG_AMPLITUDE = 0.65f;
@@ -46,6 +45,11 @@ namespace Player7654321
         [Header("照準")]
         [SerializeField] private float m_coreAimHeight = -0.35f;
 
+        [Header("攻撃アームの砲塔")]
+        [SerializeField] private TurretPart m_leftArmTurret;
+        [SerializeField] private TurretPart m_rightArmTurret;
+        [SerializeField] private TurretPart m_centerArmTurret;
+
         [Header("場外からの復帰")]
         [SerializeField, Range(0.55f, 0.9f)] private float m_returnRadiusRatio = 0.78f;
 
@@ -61,6 +65,9 @@ namespace Player7654321
         private EnemyTrack[] m_enemyTracks;
         private RotJointPart[] m_rotJointParts = new RotJointPart[0];
         private TurretPart[] m_turretParts = new TurretPart[0];
+        private int m_leftArmTurretId = DEFAULT_LEFT_ARM_TURRET_ID;
+        private int m_rightArmTurretId = DEFAULT_RIGHT_ARM_TURRET_ID;
+        private int m_centerArmTurretId = DEFAULT_CENTER_ARM_TURRET_ID;
         private Transform[][] m_attackArmLinks = new Transform[3][];
         private float[] m_attackArmLengths = { 4.0f, 4.0f, 4.0f };
         private Rigidbody m_stabilityBody;
@@ -77,7 +84,6 @@ namespace Player7654321
         {
             m_legExtensionStartedAt = Time.time;
             m_nextShotAt = Time.time;
-            m_nextShotTurret = LEFT_ARM_TURRET_ID;
             m_stabilityBody = GetComponent<Rigidbody>();
             if (m_stabilityBody != null)
             {
@@ -87,6 +93,8 @@ namespace Player7654321
             }
             GetRotJoints(CacheRotJointReferences);
             GetTurrets(CacheTurretReferences);
+            ResolveAttackArmTurretIds();
+            m_nextShotTurret = m_leftArmTurretId;
             InitializeAttackArmLinks();
             IgnoreArmRamCollisions();
         }
@@ -144,9 +152,9 @@ namespace Player7654321
         {
             if (m_rotJointParts.Length <= CENTER_ATTACK_ARM_JOINT_ID) return;
 
-            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, LEFT_ARM_TURRET_ID, 70.0f);
-            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, RIGHT_ARM_TURRET_ID, -70.0f);
-            AimAttackArm(tanks, CENTER_ATTACK_ARM_JOINT_ID, CENTER_ARM_TURRET_ID, 180.0f);
+            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, m_leftArmTurretId, 70.0f);
+            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, m_rightArmTurretId, -70.0f);
+            AimAttackArm(tanks, CENTER_ATTACK_ARM_JOINT_ID, m_centerArmTurretId, 180.0f);
         }
 
         private void AimAttackArm(TankInfo[] tanks, int jointId, int turretId, float retractAngle)
@@ -321,6 +329,25 @@ namespace Player7654321
             m_turretParts = turrets ?? new TurretPart[0];
         }
 
+        private void ResolveAttackArmTurretIds()
+        {
+            m_leftArmTurretId = FindTurretId(m_leftArmTurret, DEFAULT_LEFT_ARM_TURRET_ID);
+            m_rightArmTurretId = FindTurretId(m_rightArmTurret, DEFAULT_RIGHT_ARM_TURRET_ID);
+            m_centerArmTurretId = FindTurretId(m_centerArmTurret, DEFAULT_CENTER_ARM_TURRET_ID);
+        }
+
+        private int FindTurretId(TurretPart selectedTurret, int fallbackId)
+        {
+            if (selectedTurret == null) return fallbackId;
+
+            for (int turretId = 0; turretId < m_turretParts.Length; turretId++)
+            {
+                if (m_turretParts[turretId] == selectedTurret) return turretId;
+            }
+
+            return fallbackId;
+        }
+
         /// <summary>敵を砲門ごとに割り当て、照準が追いついた砲門から発射する。</summary>
         private void AimAndFireVolley(TankInfo[] tanks)
         {
@@ -387,9 +414,9 @@ namespace Player7654321
 
         private bool IsAttackArmTurret(int turretId)
         {
-            return turretId == LEFT_ARM_TURRET_ID
-                || turretId == RIGHT_ARM_TURRET_ID
-                || turretId == CENTER_ARM_TURRET_ID;
+            return turretId == m_leftArmTurretId
+                || turretId == m_rightArmTurretId
+                || turretId == m_centerArmTurretId;
         }
 
         private bool IsTargetable(TankInfo[] tanks, int targetId)
