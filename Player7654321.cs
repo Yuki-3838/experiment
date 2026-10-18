@@ -127,7 +127,7 @@ namespace Player7654321
             ExtendAttackArms(tanks);
         }
 
-        /// <summary>Sample06「アメンボ」のように、4秒かけて8本の脚を伸ばす。</summary>
+        /// <summary>Sample06「アメンボ」と同じ8個の回転ジョイントを4秒かけて展開する。</summary>
         private void ExtendLegsForHeight()
         {
             if (SXG_GetCountOfMyRotJoints() < STAND_JOINT_COUNT) return;
