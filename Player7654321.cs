@@ -22,6 +22,12 @@ namespace Player7654321
         private const float MIN_ATTACK_ARM_LENGTH = 3.0f;
         private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
         private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
+        private const float SHOT_STAGGER_INTERVAL = 0.4f;
+        private const float STABILIZER_LINEAR_DAMPING = 4.0f;
+        private const float STABILIZER_ANGULAR_DAMPING = 4.0f;
+        private const float MAX_STABILIZED_PLANAR_SPEED = 10.0f;
+        private const float MAX_STABILIZED_VERTICAL_SPEED = 8.0f;
+        private const float MAX_STABILIZED_ANGULAR_SPEED = 2.5f;
         // DataTank.asset の弾速。敵の移動分を先読みするために使う。
         private const float DEFAULT_SHELL_SPEED = 38.0f;
         private const float MAX_TARGET_SPEED = 24.0f;
@@ -55,20 +61,49 @@ namespace Player7654321
         private TurretPart[] m_turretParts = new TurretPart[0];
         private Transform[][] m_attackArmLinks = new Transform[3][];
         private float[] m_attackArmLengths = { 4.0f, 4.0f, 4.0f };
+        private Rigidbody m_stabilityBody;
         private int[] m_targetByTurret = new int[0];
         private float[] m_targetAssignedAt = new float[0];
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
-        private int m_sharedAttackTarget = -1;
         private Vector3 m_position;
         private Quaternion m_rotation;
         private float m_legExtensionStartedAt;
+        private float m_nextShotAt;
+        private int m_nextShotTurret;
 
         private void Start()
         {
             m_legExtensionStartedAt = Time.time;
+            m_nextShotAt = Time.time;
+            m_nextShotTurret = LEFT_ARM_TURRET_ID;
+            m_stabilityBody = GetComponent<Rigidbody>();
+            if (m_stabilityBody != null)
+            {
+                m_stabilityBody.linearDamping = Mathf.Max(m_stabilityBody.linearDamping, STABILIZER_LINEAR_DAMPING);
+                m_stabilityBody.angularDamping = Mathf.Max(m_stabilityBody.angularDamping, STABILIZER_ANGULAR_DAMPING);
+                m_stabilityBody.maxAngularVelocity = Mathf.Min(m_stabilityBody.maxAngularVelocity, MAX_STABILIZED_ANGULAR_SPEED);
+            }
             GetRotJoints(CacheRotJointReferences);
             GetTurrets(CacheTurretReferences);
             InitializeAttackArmLinks();
+            IgnoreArmRamCollisions();
+        }
+
+        private void FixedUpdate()
+        {
+            if (m_stabilityBody == null) return;
+
+            Vector3 velocity = m_stabilityBody.linearVelocity;
+            Vector3 planarVelocity = new Vector3(velocity.x, 0.0f, velocity.z);
+            if (planarVelocity.sqrMagnitude > MAX_STABILIZED_PLANAR_SPEED * MAX_STABILIZED_PLANAR_SPEED)
+                planarVelocity = planarVelocity.normalized * MAX_STABILIZED_PLANAR_SPEED;
+
+            velocity.x = planarVelocity.x;
+            velocity.z = planarVelocity.z;
+            velocity.y = Mathf.Clamp(velocity.y, -MAX_STABILIZED_VERTICAL_SPEED, MAX_STABILIZED_VERTICAL_SPEED);
+            m_stabilityBody.linearVelocity = velocity;
+            m_stabilityBody.angularVelocity = Vector3.ClampMagnitude(
+                m_stabilityBody.angularVelocity, MAX_STABILIZED_ANGULAR_SPEED);
         }
 
         private void Update()
@@ -201,6 +236,31 @@ namespace Player7654321
             }
         }
 
+        /// <summary>砲塔が敵に触れて機体を弾き飛ばさないよう、接触だけを無効にする。</summary>
+        private void IgnoreArmRamCollisions()
+        {
+            if (m_stabilityBody == null) return;
+
+            Collider[] sceneColliders = FindObjectsOfType<Collider>();
+            for (int turretId = LEFT_ARM_TURRET_ID; turretId <= CENTER_ARM_TURRET_ID; turretId++)
+            {
+                if (turretId >= m_turretParts.Length || m_turretParts[turretId] == null) continue;
+
+                Collider[] armTurretColliders = m_turretParts[turretId].GetComponentsInChildren<Collider>(true);
+                foreach (Collider armCollider in armTurretColliders)
+                {
+                    if (armCollider == null) continue;
+                    foreach (Collider sceneCollider in sceneColliders)
+                    {
+                        if (sceneCollider == null || sceneCollider.attachedRigidbody == m_stabilityBody) continue;
+                        BaseTank otherTank = sceneCollider.GetComponentInParent<BaseTank>();
+                        if (otherTank == null) continue;
+                        Physics.IgnoreCollision(armCollider, sceneCollider, true);
+                    }
+                }
+            }
+        }
+
         private Transform[] GetAttackArmLinks(int jointId)
         {
             int armIndex = jointId - LEFT_ATTACK_ARM_JOINT_ID;
@@ -266,51 +326,50 @@ namespace Player7654321
             EnsureTurretTargets(turretCount);
 
             m_assignedTargets.Clear();
-            if (!IsTargetable(tanks, m_sharedAttackTarget))
-                m_sharedAttackTarget = FindBestTarget(tanks, null);
-
-            for (int turretId = 0; turretId < turretCount; turretId++)
+            // 腕の3砲塔を先に割り当て、敵が3台いる場合はそれぞれ別の敵を狙わせる。
+            for (int priorityPass = 0; priorityPass < 2; priorityPass++)
             {
-                int targetId;
-                if (IsAttackArmTurret(turretId))
+                bool prioritizeArms = priorityPass == 0;
+                for (int turretId = 0; turretId < turretCount; turretId++)
                 {
-                    // 3本の腕は同じ敵の中心へ集中させ、砲塔をまとめて突き刺す。
-                    targetId = m_sharedAttackTarget;
-                }
-                else
-                {
-                    targetId = m_targetByTurret[turretId];
+                    if (IsAttackArmTurret(turretId) != prioritizeArms) continue;
+
+                    int targetId = m_targetByTurret[turretId];
                     if (!IsTargetable(tanks, targetId) || m_assignedTargets.Contains(targetId))
                     {
                         targetId = FindBestTarget(tanks, m_assignedTargets);
                         if (targetId < 0)
                             targetId = FindBestTarget(tanks, null);
                     }
+
+                    if (targetId != m_targetByTurret[turretId])
+                        m_targetAssignedAt[turretId] = Time.time;
+
+                    m_targetByTurret[turretId] = targetId;
+                    if (targetId < 0)
+                    {
+                        SXG_RotateTurretToAngle(turretId, 0.0f, 0.0f);
+                        continue;
+                    }
+
+                    m_assignedTargets.Add(targetId);
+                    Vector3 impactPoint = GetPredictedAimPoint(tanks[targetId], targetId);
+                    SXG_RotateTurretToImpactPoint(turretId, impactPoint);
                 }
-
-                if (targetId != m_targetByTurret[turretId])
-                    m_targetAssignedAt[turretId] = Time.time;
-
-                m_targetByTurret[turretId] = targetId;
-                if (targetId < 0)
-                {
-                    SXG_RotateTurretToAngle(turretId, 0.0f, 0.0f);
-                    continue;
-                }
-
-                m_assignedTargets.Add(targetId);
-                Vector3 impactPoint = GetPredictedAimPoint(tanks[targetId], targetId);
-                SXG_RotateTurretToImpactPoint(turretId, impactPoint);
             }
 
-            // 砲塔の最大旋回時間を待ってから撃ち、照準前の初弾が前方へ飛ぶのを防ぐ。
-            for (int turretId = 0; turretId < turretCount; turretId++)
+            // 同フレームに複数砲を撃たず、反動を一発ずつに分散する。
+            if (Time.time < m_nextShotAt) return;
+            for (int shotOrder = 0; shotOrder < turretCount; shotOrder++)
             {
+                int turretId = (m_nextShotTurret + shotOrder) % turretCount;
                 int targetId = m_targetByTurret[turretId];
                 if (targetId < 0 || !SXG_CanShoot(turretId)) continue;
                 if (Time.time - m_targetAssignedAt[turretId] < TURRET_AIM_SETTLE_TIME) continue;
 
                 SXG_Shoot(turretId);
+                m_nextShotAt = Time.time + SHOT_STAGGER_INTERVAL;
+                m_nextShotTurret = (turretId + 1) % turretCount;
 
                 if (m_enemyTracks != null && targetId < m_enemyTracks.Length)
                 {
@@ -318,6 +377,8 @@ namespace Player7654321
                     track.LastEngagedAt = Time.time;
                     m_enemyTracks[targetId] = track;
                 }
+
+                break;
             }
         }
 
