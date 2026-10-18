@@ -12,11 +12,13 @@ namespace Player7654321
         private const int STAND_JOINT_COUNT = 8;
         private const int LEFT_ATTACK_ARM_JOINT_ID = 8;
         private const int RIGHT_ATTACK_ARM_JOINT_ID = 9;
+        private const int CENTER_ATTACK_ARM_JOINT_ID = 10;
         private const int LEFT_ARM_TURRET_ID = 2;
         private const int RIGHT_ARM_TURRET_ID = 3;
+        private const int CENTER_ARM_TURRET_ID = 4;
         private const float MIN_ATTACK_ARM_LENGTH = 3.0f;
-        private const float MAX_ATTACK_ARM_LENGTH = 20.0f;
-        private const float ATTACK_ARM_EXTENSION_SPEED = 18.0f;
+        private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
+        private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
         // DataTank.asset の弾速。敵の移動分を先読みするために使う。
         private const float DEFAULT_SHELL_SPEED = 38.0f;
         private const float MAX_TARGET_SPEED = 24.0f;
@@ -93,27 +95,28 @@ namespace Player7654321
             }
         }
 
-        /// <summary>脚とは別の伸縮式2本腕を、先端砲塔が狙う標的へ伸ばす。</summary>
+        /// <summary>脚とは別の伸縮式3本腕を、先端砲塔が狙う標的へ伸ばす。</summary>
         private void ExtendAttackArms(TankInfo[] tanks)
         {
-            if (m_rotJointParts.Length <= RIGHT_ATTACK_ARM_JOINT_ID) return;
+            if (m_rotJointParts.Length <= CENTER_ATTACK_ARM_JOINT_ID) return;
 
-            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, LEFT_ARM_TURRET_ID, 1.0f);
-            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, RIGHT_ARM_TURRET_ID, -1.0f);
+            AimAttackArm(tanks, LEFT_ATTACK_ARM_JOINT_ID, LEFT_ARM_TURRET_ID, 70.0f);
+            AimAttackArm(tanks, RIGHT_ATTACK_ARM_JOINT_ID, RIGHT_ARM_TURRET_ID, -70.0f);
+            AimAttackArm(tanks, CENTER_ATTACK_ARM_JOINT_ID, CENTER_ARM_TURRET_ID, 180.0f);
         }
 
-        private void AimAttackArm(TankInfo[] tanks, int jointId, int turretId, float sideSign)
+        private void AimAttackArm(TankInfo[] tanks, int jointId, int turretId, float retractAngle)
         {
             if (turretId < 0 || turretId >= m_targetByTurret.Length || turretId >= m_turretParts.Length)
             {
-                RetractAttackArm(jointId, turretId, sideSign);
+                RetractAttackArm(jointId, turretId, retractAngle);
                 return;
             }
 
             int targetId = m_targetByTurret[turretId];
             if (!IsTargetable(tanks, targetId))
             {
-                RetractAttackArm(jointId, turretId, sideSign);
+                RetractAttackArm(jointId, turretId, retractAngle);
                 return;
             }
 
@@ -121,7 +124,7 @@ namespace Player7654321
             TurretPart turret = m_turretParts[turretId];
             if (attackJoint == null || turret == null)
             {
-                RetractAttackArm(jointId, turretId, sideSign);
+                RetractAttackArm(jointId, turretId, retractAngle);
                 return;
             }
 
@@ -140,9 +143,9 @@ namespace Player7654321
             SetAttackArmLength(armSegment, turret.transform, armLength);
         }
 
-        private void RetractAttackArm(int jointId, int turretId, float sideSign)
+        private void RetractAttackArm(int jointId, int turretId, float retractAngle)
         {
-            SXG_RotateJointToAngle(jointId, sideSign * 70.0f);
+            SXG_RotateJointToAngle(jointId, retractAngle);
 
             if (turretId < 0 || turretId >= m_turretParts.Length || m_turretParts[turretId] == null)
                 return;
