@@ -117,6 +117,7 @@ namespace Player7654321
             ResolveAttackArmJointIds();
             ResolveAttackArmTurretIds();
             ResolveAttitudeTurretIds();
+            OrientAttackArmTurretsOutward();
             m_nextShotTurret = m_leftArmTurretId;
             m_attitudeTurretsReadyAt = Time.time + 0.5f;
             InitializeAttackArmLinks();
@@ -415,6 +416,24 @@ namespace Player7654321
             m_leftArmTurretId = FindTurretId(m_leftArmTurret, DEFAULT_LEFT_ARM_TURRET_ID);
             m_rightArmTurretId = FindTurretId(m_rightArmTurret, DEFAULT_RIGHT_ARM_TURRET_ID);
             m_centerArmTurretId = FindTurretId(m_centerArmTurret, DEFAULT_CENTER_ARM_TURRET_ID);
+        }
+
+        /// <summary>攻撃砲塔の前方を腕の伸長方向へ揃え、照準APIのローカル軸を正しく保つ。</summary>
+        private void OrientAttackArmTurretsOutward()
+        {
+            OrientAttackArmTurretOutward(m_leftArmTurretId);
+            OrientAttackArmTurretOutward(m_rightArmTurretId);
+            OrientAttackArmTurretOutward(m_centerArmTurretId);
+        }
+
+        private void OrientAttackArmTurretOutward(int turretId)
+        {
+            if (turretId < 0 || turretId >= m_turretParts.Length || m_turretParts[turretId] == null)
+                return;
+            if (IsAttitudeControlTurret(turretId)) return;
+
+            // アーム先端から車体側（ローカル +Z）へ狙えるよう、照準APIの基準軸を正面に揃える。
+            m_turretParts[turretId].transform.localRotation = Quaternion.identity;
         }
 
         private void ResolveAttitudeTurretIds()
