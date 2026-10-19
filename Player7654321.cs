@@ -26,6 +26,7 @@ namespace Player7654321
         private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
         private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
         private const float SHOT_STAGGER_INTERVAL = 0.4f;
+        private const float ATTITUDE_ROLL_PREDICTION_TIME = 0.25f;
         private const float STABILIZER_LINEAR_DAMPING = 6.0f;
         private const float STABILIZER_ANGULAR_DAMPING = 5.0f;
         private const float MAX_STABILIZED_PLANAR_SPEED = 7.5f;
@@ -62,7 +63,7 @@ namespace Player7654321
         [SerializeField] private TurretPart m_rightAttitudeTurret;
         [SerializeField, Min(0.0f)] private float m_uprightCorrectionStrength = 12.0f;
         [SerializeField, Min(0.0f)] private float m_uprightAngularDamping = 4.0f;
-        [SerializeField, Range(0.05f, 0.5f)] private float m_rollCorrectionThreshold = 0.18f;
+        [SerializeField, Range(0.05f, 0.5f)] private float m_rollCorrectionThreshold = 0.1f;
 
         [Header("場外からの復帰")]
         [SerializeField, Range(0.55f, 0.9f)] private float m_returnRadiusRatio = 0.7f;
@@ -737,14 +738,15 @@ namespace Player7654321
 
             Vector3 rollCorrection = Vector3.Cross(m_stabilityBody.transform.up, Vector3.up);
             float rollError = Vector3.Dot(rollCorrection, heading);
-            if (Mathf.Abs(rollError) < m_rollCorrectionThreshold) return;
-
             float rollRate = Vector3.Dot(m_stabilityBody.angularVelocity, heading);
-            // 連続トルクがすでに傾きを戻している間は砲撃しない。
-            if (rollError * rollRate > 0.0f) return;
+            // 角速度から少し先のロールを予測し、傾きが大きくなる前に左右どちらかを補正する。
+            float predictedRollError = rollError - rollRate * ATTITUDE_ROLL_PREDICTION_TIME;
+            if (Mathf.Abs(predictedRollError) < m_rollCorrectionThreshold) return;
             if (Time.time < m_nextShotAt) return;
 
-            int correctionTurretId = rollError < 0.0f ? m_leftAttitudeTurretId : m_rightAttitudeTurretId;
+            int correctionTurretId = predictedRollError < 0.0f
+                ? m_leftAttitudeTurretId
+                : m_rightAttitudeTurretId;
             if (!SXG_CanShoot(correctionTurretId)) return;
 
             SXG_Shoot(correctionTurretId);
