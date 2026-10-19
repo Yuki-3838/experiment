@@ -17,6 +17,8 @@ namespace Player7654321
         private const int DEFAULT_LEFT_ARM_TURRET_ID = 3;
         private const int DEFAULT_RIGHT_ARM_TURRET_ID = 2;
         private const int DEFAULT_CENTER_ARM_TURRET_ID = 4;
+        private const int DEFAULT_LEFT_ATTITUDE_TURRET_ID = 1;
+        private const int DEFAULT_RIGHT_ATTITUDE_TURRET_ID = 0;
         private const int ATTACK_ARM_LINK_COUNT = 10;
         private const float ATTACK_ARM_LINK_THICKNESS = 0.24f;
         private const float ATTACK_ARM_ZIGZAG_AMPLITUDE = 0.65f;
@@ -24,11 +26,11 @@ namespace Player7654321
         private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
         private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
         private const float SHOT_STAGGER_INTERVAL = 0.4f;
-        private const float STABILIZER_LINEAR_DAMPING = 4.0f;
-        private const float STABILIZER_ANGULAR_DAMPING = 4.0f;
-        private const float MAX_STABILIZED_PLANAR_SPEED = 10.0f;
-        private const float MAX_STABILIZED_VERTICAL_SPEED = 8.0f;
-        private const float MAX_STABILIZED_ANGULAR_SPEED = 2.5f;
+        private const float STABILIZER_LINEAR_DAMPING = 6.0f;
+        private const float STABILIZER_ANGULAR_DAMPING = 5.0f;
+        private const float MAX_STABILIZED_PLANAR_SPEED = 7.5f;
+        private const float MAX_STABILIZED_VERTICAL_SPEED = 6.0f;
+        private const float MAX_STABILIZED_ANGULAR_SPEED = 2.0f;
         // DataTank.asset の弾速。敵の移動分を先読みするために使う。
         private const float DEFAULT_SHELL_SPEED = 38.0f;
         private const float MAX_TARGET_SPEED = 24.0f;
@@ -55,8 +57,16 @@ namespace Player7654321
         [SerializeField] private TurretPart m_rightArmTurret;
         [SerializeField] private TurretPart m_centerArmTurret;
 
+        [Header("姿勢制御")]
+        [SerializeField] private TurretPart m_leftAttitudeTurret;
+        [SerializeField] private TurretPart m_rightAttitudeTurret;
+        [SerializeField, Min(0.0f)] private float m_uprightCorrectionStrength = 12.0f;
+        [SerializeField, Min(0.0f)] private float m_uprightAngularDamping = 4.0f;
+        [SerializeField, Range(0.05f, 0.5f)] private float m_rollCorrectionThreshold = 0.18f;
+
         [Header("場外からの復帰")]
-        [SerializeField, Range(0.55f, 0.9f)] private float m_returnRadiusRatio = 0.78f;
+        [SerializeField, Range(0.55f, 0.9f)] private float m_returnRadiusRatio = 0.7f;
+        [SerializeField, Min(0.0f)] private float m_returnAcceleration = 24.0f;
 
         private struct EnemyTrack
         {
@@ -76,6 +86,8 @@ namespace Player7654321
         private int m_leftArmTurretId = DEFAULT_LEFT_ARM_TURRET_ID;
         private int m_rightArmTurretId = DEFAULT_RIGHT_ARM_TURRET_ID;
         private int m_centerArmTurretId = DEFAULT_CENTER_ARM_TURRET_ID;
+        private int m_leftAttitudeTurretId = DEFAULT_LEFT_ATTITUDE_TURRET_ID;
+        private int m_rightAttitudeTurretId = DEFAULT_RIGHT_ATTITUDE_TURRET_ID;
         private Transform[][] m_attackArmLinks = new Transform[3][];
         private float[] m_attackArmLengths = { 4.0f, 4.0f, 4.0f };
         private Rigidbody m_stabilityBody;
@@ -86,6 +98,7 @@ namespace Player7654321
         private Quaternion m_rotation;
         private float m_legExtensionStartedAt;
         private float m_nextShotAt;
+        private float m_attitudeTurretsReadyAt;
         private int m_nextShotTurret;
 
         private void Start()
@@ -103,7 +116,9 @@ namespace Player7654321
             GetTurrets(CacheTurretReferences);
             ResolveAttackArmJointIds();
             ResolveAttackArmTurretIds();
+            ResolveAttitudeTurretIds();
             m_nextShotTurret = m_leftArmTurretId;
+            m_attitudeTurretsReadyAt = Time.time + 0.5f;
             InitializeAttackArmLinks();
             IgnoreArmRamCollisions();
         }
@@ -123,6 +138,27 @@ namespace Player7654321
             m_stabilityBody.linearVelocity = velocity;
             m_stabilityBody.angularVelocity = Vector3.ClampMagnitude(
                 m_stabilityBody.angularVelocity, MAX_STABILIZED_ANGULAR_SPEED);
+
+            Vector3 uprightError = GetUprightRotationError(m_stabilityBody.transform);
+            Vector3 tiltAngularVelocity = Vector3.ProjectOnPlane(m_stabilityBody.angularVelocity, Vector3.up);
+            Vector3 uprightTorque = uprightError * m_uprightCorrectionStrength
+                - tiltAngularVelocity * m_uprightAngularDamping;
+            m_stabilityBody.AddTorque(uprightTorque, ForceMode.Acceleration);
+
+            Vector3 planarPosition = Flatten(m_stabilityBody.position);
+            float radius = planarPosition.magnitude;
+            float returnRadius = GameConstants.ABOUT_GAME_FIELD_RADIUS * m_returnRadiusRatio;
+            if (radius > returnRadius && radius > 0.001f)
+            {
+                Vector3 inward = -planarPosition / radius;
+                float inwardSpeed = Vector3.Dot(planarVelocity, inward);
+                float desiredInwardSpeed = Mathf.Min(7.0f, 3.0f + (radius - returnRadius) * 0.75f);
+                float returnAcceleration = Mathf.Clamp(
+                    (desiredInwardSpeed - inwardSpeed) * 2.0f,
+                    -m_returnAcceleration,
+                    m_returnAcceleration);
+                m_stabilityBody.AddForce(inward * returnAcceleration, ForceMode.Acceleration);
+            }
         }
 
         private void Update()
@@ -140,6 +176,7 @@ namespace Player7654321
 
             // キャタピラは通常止め、外周へ流されたときだけ水平に戻す。
             RecoverFromFieldEdge();
+            ControlAttitudeTurrets();
             AimAndFireVolley(tanks);
             ExtendAttackArms(tanks);
         }
@@ -380,6 +417,12 @@ namespace Player7654321
             m_centerArmTurretId = FindTurretId(m_centerArmTurret, DEFAULT_CENTER_ARM_TURRET_ID);
         }
 
+        private void ResolveAttitudeTurretIds()
+        {
+            m_leftAttitudeTurretId = FindTurretId(m_leftAttitudeTurret, DEFAULT_LEFT_ATTITUDE_TURRET_ID);
+            m_rightAttitudeTurretId = FindTurretId(m_rightAttitudeTurret, DEFAULT_RIGHT_ATTITUDE_TURRET_ID);
+        }
+
         private int FindTurretId(TurretPart selectedTurret, int fallbackId)
         {
             if (selectedTurret == null) return fallbackId;
@@ -406,6 +449,11 @@ namespace Player7654321
                 bool prioritizeArms = priorityPass == 0;
                 for (int turretId = 0; turretId < turretCount; turretId++)
                 {
+                    if (IsAttitudeControlTurret(turretId))
+                    {
+                        m_targetByTurret[turretId] = -1;
+                        continue;
+                    }
                     if (IsAttackArmTurret(turretId) != prioritizeArms) continue;
 
                     int targetId = m_targetByTurret[turretId];
@@ -437,9 +485,11 @@ namespace Player7654321
             for (int shotOrder = 0; shotOrder < turretCount; shotOrder++)
             {
                 int turretId = (m_nextShotTurret + shotOrder) % turretCount;
+                if (IsAttitudeControlTurret(turretId)) continue;
                 int targetId = m_targetByTurret[turretId];
                 if (targetId < 0 || !SXG_CanShoot(turretId)) continue;
                 if (Time.time - m_targetAssignedAt[turretId] < TURRET_AIM_SETTLE_TIME) continue;
+                if (!IsAttackArmReadyToShoot(turretId, targetId, tanks)) continue;
 
                 SXG_Shoot(turretId);
                 m_nextShotAt = Time.time + SHOT_STAGGER_INTERVAL;
@@ -461,6 +511,40 @@ namespace Player7654321
             return turretId == m_leftArmTurretId
                 || turretId == m_rightArmTurretId
                 || turretId == m_centerArmTurretId;
+        }
+
+        private bool IsAttitudeControlTurret(int turretId)
+        {
+            return turretId == m_leftAttitudeTurretId || turretId == m_rightAttitudeTurretId;
+        }
+
+        private bool IsValidAttitudeTurretId(int turretId)
+        {
+            return turretId >= 0 && turretId < m_turretParts.Length && m_turretParts[turretId] != null;
+        }
+
+        private bool IsAttackArmReadyToShoot(int turretId, int targetId, TankInfo[] tanks)
+        {
+            int armIndex = GetAttackArmIndexForTurret(turretId);
+            if (armIndex < 0) return true;
+
+            int jointId = GetAttackArmJointId(armIndex);
+            if (!IsValidAttackArmJointId(jointId) || m_attackArmLinks[armIndex] == null) return false;
+
+            Vector3 targetPosition = GetPredictedAimPoint(tanks[targetId], targetId);
+            float requiredLength = Mathf.Clamp(
+                Vector3.Distance(m_rotJointParts[jointId].transform.position, targetPosition) + 0.8f,
+                MIN_ATTACK_ARM_LENGTH,
+                MAX_ATTACK_ARM_LENGTH);
+            return m_attackArmLengths[armIndex] >= requiredLength - 1.0f;
+        }
+
+        private int GetAttackArmIndexForTurret(int turretId)
+        {
+            if (turretId == m_leftArmTurretId) return 0;
+            if (turretId == m_rightArmTurretId) return 1;
+            if (turretId == m_centerArmTurretId) return 2;
+            return -1;
         }
 
         private bool IsTargetable(TankInfo[] tanks, int targetId)
@@ -616,6 +700,38 @@ namespace Player7654321
             SXG_SetCaterpillarPower(0.0f, 0.0f);
         }
 
+        /// <summary>左右の下向き砲塔をロール補正に使い、発射時の反動で傾きを戻す。</summary>
+        private void ControlAttitudeTurrets()
+        {
+            if (!IsValidAttitudeTurretId(m_leftAttitudeTurretId)
+                || !IsValidAttitudeTurretId(m_rightAttitudeTurretId)
+                || m_leftAttitudeTurretId == m_rightAttitudeTurretId) return;
+
+            // 砲身を下向きに保つ。下向き弾の反動は機体を押し上げる。
+            SXG_RotateTurretToAngle(m_leftAttitudeTurretId, 0.0f, 0.0f);
+            SXG_RotateTurretToAngle(m_rightAttitudeTurretId, 0.0f, 0.0f);
+            if (Time.time < m_attitudeTurretsReadyAt || m_stabilityBody == null) return;
+
+            Vector3 heading = Vector3.ProjectOnPlane(m_stabilityBody.transform.forward, Vector3.up);
+            if (heading.sqrMagnitude < 0.001f) return;
+            heading.Normalize();
+
+            Vector3 rollCorrection = Vector3.Cross(m_stabilityBody.transform.up, Vector3.up);
+            float rollError = Vector3.Dot(rollCorrection, heading);
+            if (Mathf.Abs(rollError) < m_rollCorrectionThreshold) return;
+
+            float rollRate = Vector3.Dot(m_stabilityBody.angularVelocity, heading);
+            // 連続トルクがすでに傾きを戻している間は砲撃しない。
+            if (rollError * rollRate > 0.0f) return;
+            if (Time.time < m_nextShotAt) return;
+
+            int correctionTurretId = rollError < 0.0f ? m_leftAttitudeTurretId : m_rightAttitudeTurretId;
+            if (!SXG_CanShoot(correctionTurretId)) return;
+
+            SXG_Shoot(correctionTurretId);
+            m_nextShotAt = Time.time + SHOT_STAGGER_INTERVAL;
+        }
+
         private void EnsureTrackStorage(int requiredCount)
         {
             if (m_enemyTracks != null && m_enemyTracks.Length >= requiredCount) return;
@@ -643,6 +759,28 @@ namespace Player7654321
         {
             value.y = 0.0f;
             return value;
+        }
+
+        private static Vector3 GetUprightRotationError(Transform bodyTransform)
+        {
+            Vector3 bodyUp = bodyTransform.up;
+            Vector3 axis = Vector3.Cross(bodyUp, Vector3.up);
+            float upDot = Mathf.Clamp(Vector3.Dot(bodyUp, Vector3.up), -1.0f, 1.0f);
+
+            if (axis.sqrMagnitude < 0.000001f)
+            {
+                if (upDot > 0.0f) return Vector3.zero;
+
+                // 180度ひっくり返った時は外積がゼロになるので、機体前方向を軸に起こす。
+                axis = Vector3.ProjectOnPlane(bodyTransform.forward, Vector3.up);
+                if (axis.sqrMagnitude < 0.000001f)
+                    axis = Vector3.ProjectOnPlane(bodyTransform.right, Vector3.up);
+                if (axis.sqrMagnitude < 0.000001f) axis = Vector3.forward;
+                return axis.normalized * Mathf.PI;
+            }
+
+            float angle = Mathf.Acos(upDot);
+            return axis.normalized * angle;
         }
     }
 }
