@@ -9,36 +9,65 @@ namespace Player7654321
     /// </summary>
     public class Player7654321 : ComPlayerBase
     {
+        // 立ち上がりに使う脚ジョイント数。
         private const int STAND_JOINT_COUNT = 8;
+        // 左攻撃腕ジョイントのInspector未設定時の番号。
         private const int DEFAULT_LEFT_ATTACK_ARM_JOINT_ID = 8;
+        // 右攻撃腕ジョイントのInspector未設定時の番号。
         private const int DEFAULT_RIGHT_ATTACK_ARM_JOINT_ID = 9;
+        // 中央攻撃腕ジョイントのInspector未設定時の番号。
         private const int DEFAULT_CENTER_ATTACK_ARM_JOINT_ID = 10;
-        // GetTurrets() array indices used if the inspector references are unset.
+        // Inspector未設定時に使う左攻撃腕の砲塔番号。
         private const int DEFAULT_LEFT_ARM_TURRET_ID = 3;
+        // 右攻撃腕の砲塔番号。
         private const int DEFAULT_RIGHT_ARM_TURRET_ID = 2;
+        // 中央攻撃腕の砲塔番号。
         private const int DEFAULT_CENTER_ARM_TURRET_ID = 4;
+        // 左側の姿勢制御砲塔番号。
         private const int DEFAULT_LEFT_ATTITUDE_TURRET_ID = 1;
+        // 右側の姿勢制御砲塔番号。
         private const int DEFAULT_RIGHT_ATTITUDE_TURRET_ID = 0;
+        // 各攻撃腕を描画する分割リンク数。
         private const int ATTACK_ARM_LINK_COUNT = 10;
+        // 攻撃腕が新しい落下パーツなどへ接触しないよう、衝突除外を再確認する間隔。
+        private const float ARM_COLLISION_REFRESH_INTERVAL = 1.0f;
+        // 描画用リンクの断面幅。
         private const float ATTACK_ARM_LINK_THICKNESS = 0.24f;
+        // 腕リンクを交互に振る幅。
         private const float ATTACK_ARM_ZIGZAG_AMPLITUDE = 0.65f;
+        // 攻撃腕を縮めた時の最小長。
         private const float MIN_ATTACK_ARM_LENGTH = 3.0f;
+        // 攻撃腕の最大伸長距離。
         private const float MAX_ATTACK_ARM_LENGTH = 80.0f;
+        // 攻撃腕の伸縮速度。
         private const float ATTACK_ARM_EXTENSION_SPEED = 60.0f;
+        // 反動を分散するために砲撃間へ空ける時間。
         private const float SHOT_STAGGER_INTERVAL = 0.4f;
+        // 姿勢補正でロール角速度を先読みする秒数。
         private const float ATTITUDE_ROLL_PREDICTION_TIME = 0.25f;
+        // 機体の移動速度を抑える最低線形減衰。
         private const float STABILIZER_LINEAR_DAMPING = 6.0f;
+        // 機体の回転速度を抑える最低角減衰。
         private const float STABILIZER_ANGULAR_DAMPING = 5.0f;
+        // 水平移動の上限速度。
         private const float MAX_STABILIZED_PLANAR_SPEED = 7.5f;
+        // 上下移動の上限速度。
         private const float MAX_STABILIZED_VERTICAL_SPEED = 6.0f;
+        // 機体回転の上限角速度。
         private const float MAX_STABILIZED_ANGULAR_SPEED = 2.0f;
         // DataTank.asset の弾速。敵の移動分を先読みするために使う。
         private const float DEFAULT_SHELL_SPEED = 38.0f;
+        // 敵速度推定の上限値。
         private const float MAX_TARGET_SPEED = 24.0f;
+        // 砲撃の先読み時間の上限。
         private const float MAX_LEAD_TIME = 1.5f;
+        // 測定速度へ追従する平滑化率。
         private const float VELOCITY_SMOOTHING = 0.55f;
+        // 脚を完全に展開するまでの秒数。
         private const float LEG_EXTENSION_TIME = 4.0f;
+        // 砲塔の標的変更後、射撃前に待つ秒数。
         private const float TURRET_AIM_SETTLE_TIME = 1.25f;
+        // 8脚を直立へ展開する各ジョイントの最終角度。
         private static readonly float[] s_standUpJointAngles =
         {
             -160.0f, -160.0f, 160.0f, 160.0f,
@@ -46,62 +75,108 @@ namespace Player7654321
         };
 
         [Header("照準")]
+        // 敵中心への照準位置を上下に微調整する値。
         [SerializeField] private float m_coreAimHeight = -0.35f;
 
         [Header("攻撃アームのジョイント")]
+        // Inspectorから選択する左腕の回転ジョイント。
         [SerializeField] private RotJointPart m_leftAttackArmJoint;
+        // Inspectorから選択する右腕の回転ジョイント。
         [SerializeField] private RotJointPart m_rightAttackArmJoint;
+        // Inspectorから選択する中央腕の回転ジョイント。
         [SerializeField] private RotJointPart m_centerAttackArmJoint;
 
         [Header("攻撃アームの砲塔")]
+        // Inspectorから選択する左腕先端の攻撃砲塔。
         [SerializeField] private TurretPart m_leftArmTurret;
+        // Inspectorから選択する右腕先端の攻撃砲塔。
         [SerializeField] private TurretPart m_rightArmTurret;
+        // Inspectorから選択する中央腕先端の攻撃砲塔。
         [SerializeField] private TurretPart m_centerArmTurret;
 
         [Header("姿勢制御")]
+        // Inspectorから選択する左側の下向き姿勢制御砲塔。
         [SerializeField] private TurretPart m_leftAttitudeTurret;
+        // Inspectorから選択する右側の下向き姿勢制御砲塔。
         [SerializeField] private TurretPart m_rightAttitudeTurret;
+        // 直立状態へ戻すトルクの強さ。
         [SerializeField, Min(0.0f)] private float m_uprightCorrectionStrength = 12.0f;
+        // 姿勢補正時に角速度へかける減衰。
         [SerializeField, Min(0.0f)] private float m_uprightAngularDamping = 4.0f;
+        // 姿勢制御砲塔を撃つロール誤差のしきい値。
         [SerializeField, Range(0.05f, 0.5f)] private float m_rollCorrectionThreshold = 0.1f;
 
         [Header("場外からの復帰")]
+        // このフィールド半径比を超えたら中央へ戻る。
         [SerializeField, Range(0.55f, 0.9f)] private float m_returnRadiusRatio = 0.7f;
+        // 外周から戻る時に加える最大加速度。
         [SerializeField, Min(0.0f)] private float m_returnAcceleration = 24.0f;
 
+        /// <summary>敵1台ぶんの追跡状態と射撃履歴。</summary>
         private struct EnemyTrack
         {
+            /// <summary>有効な位置履歴が保存されているか。</summary>
             public bool HasPosition;
+            /// <summary>前回観測した敵の位置。</summary>
             public Vector3 PreviousPosition;
+            /// <summary>平滑化した敵の移動速度。</summary>
             public Vector3 Velocity;
+            /// <summary>最後に敵の位置を観測した時刻。</summary>
             public float LastObservedAt;
+            /// <summary>最後にこの敵へ発射した時刻。</summary>
             public float LastEngagedAt;
         }
 
+        // 敵ごとの位置と速度の履歴。
         private EnemyTrack[] m_enemyTracks;
+        // 機体の回転ジョイント参照一覧。
         private RotJointPart[] m_rotJointParts = new RotJointPart[0];
+        // 機体の砲塔参照一覧。
         private TurretPart[] m_turretParts = new TurretPart[0];
+        // 解決済みの左腕ジョイント番号。
         private int m_leftAttackArmJointId = DEFAULT_LEFT_ATTACK_ARM_JOINT_ID;
+        // 解決済みの右腕ジョイント番号。
         private int m_rightAttackArmJointId = DEFAULT_RIGHT_ATTACK_ARM_JOINT_ID;
+        // 解決済みの中央腕ジョイント番号。
         private int m_centerAttackArmJointId = DEFAULT_CENTER_ATTACK_ARM_JOINT_ID;
+        // 解決済みの左腕砲塔番号。
         private int m_leftArmTurretId = DEFAULT_LEFT_ARM_TURRET_ID;
+        // 解決済みの右腕砲塔番号。
         private int m_rightArmTurretId = DEFAULT_RIGHT_ARM_TURRET_ID;
+        // 解決済みの中央腕砲塔番号。
         private int m_centerArmTurretId = DEFAULT_CENTER_ARM_TURRET_ID;
+        // 解決済みの左姿勢制御砲塔番号。
         private int m_leftAttitudeTurretId = DEFAULT_LEFT_ATTITUDE_TURRET_ID;
+        // 解決済みの右姿勢制御砲塔番号。
         private int m_rightAttitudeTurretId = DEFAULT_RIGHT_ATTITUDE_TURRET_ID;
+        // 3本の腕を描くリンクTransform配列。
         private Transform[][] m_attackArmLinks = new Transform[3][];
+        // 各腕の現在の長さ。
         private float[] m_attackArmLengths = { 4.0f, 4.0f, 4.0f };
+        // 速度・姿勢制御を適用する機体Rigidbody。
         private Rigidbody m_stabilityBody;
+        // 各砲塔に割り当てた標的番号。
         private int[] m_targetByTurret = new int[0];
+        // 各砲塔が現在の標的を割り当てられた時刻。
         private float[] m_targetAssignedAt = new float[0];
+        // 同じ敵への重複割当を避ける作業用集合。
         private readonly HashSet<int> m_assignedTargets = new HashSet<int>();
+        // APIから取得した自機位置。
         private Vector3 m_position;
+        // APIから取得した自機回転。
         private Quaternion m_rotation;
+        // 脚展開を開始した時刻。
         private float m_legExtensionStartedAt;
+        // 次の砲撃を許可する時刻。
         private float m_nextShotAt;
+        // 姿勢制御砲塔を使い始める時刻。
         private float m_attitudeTurretsReadyAt;
+        // 交互射撃で次に調べる砲塔番号。
         private int m_nextShotTurret;
+        // 次に攻撃腕の衝突除外を更新する時刻。
+        private float m_nextArmCollisionRefreshAt;
 
+        /// <summary>機体の初期化、脚と腕の展開準備、接触判定の安定化を行う。</summary>
         private void Start()
         {
             m_legExtensionStartedAt = Time.time;
@@ -122,9 +197,11 @@ namespace Player7654321
             m_nextShotTurret = m_leftArmTurretId;
             m_attitudeTurretsReadyAt = Time.time + 0.5f;
             InitializeAttackArmLinks();
+            ReplaceOwnConvexMeshesWithBoxes();
             IgnoreArmRamCollisions();
         }
 
+        /// <summary>物理更新ごとに速度と角速度を制限し、姿勢とフィールド内への復帰を補正する。</summary>
         private void FixedUpdate()
         {
             if (m_stabilityBody == null) return;
@@ -163,6 +240,7 @@ namespace Player7654321
             }
         }
 
+        /// <summary>毎フレームの敵追跡、脚・腕の制御、照準と射撃を順番に更新する。</summary>
         private void Update()
         {
             SXG_GetPositionAndRotation(out m_position, out m_rotation);
@@ -181,6 +259,7 @@ namespace Player7654321
             ControlAttitudeTurrets();
             AimAndFireVolley(tanks);
             ExtendAttackArms(tanks);
+            IgnoreArmRamCollisions();
         }
 
         /// <summary>Sample06「アメンボ」と同じ8個の回転ジョイントを4秒かけて展開する。</summary>
@@ -207,6 +286,7 @@ namespace Player7654321
             AimAttackArm(tanks, 2, m_centerAttackArmJointId, m_centerArmTurretId, 180.0f);
         }
 
+        /// <summary>指定した攻撃腕を標的の中心へ向け、先端砲塔が届く長さまで伸ばす。</summary>
         private void AimAttackArm(TankInfo[] tanks, int armIndex, int jointId, int turretId, float retractAngle)
         {
             if (turretId < 0 || turretId >= m_targetByTurret.Length || turretId >= m_turretParts.Length)
@@ -247,6 +327,7 @@ namespace Player7654321
             SetAttackArmLength(armIndex, armLinks, turret.transform, armLength, pitchAngle);
         }
 
+        /// <summary>標的がいない攻撃腕を車体側へ戻し、先端砲塔も短い位置へ戻す。</summary>
         private void RetractAttackArm(int armIndex, int jointId, int turretId, float retractAngle)
         {
             SXG_RotateJointToAngle(jointId, retractAngle);
@@ -262,6 +343,7 @@ namespace Player7654321
                 SetAttackArmLength(armIndex, armLinks, m_turretParts[turretId].transform, MIN_ATTACK_ARM_LENGTH, 0.0f);
         }
 
+        /// <summary>各攻撃腕の見た目を構成するリンクを複製し、初期長を記録する。</summary>
         private void InitializeAttackArmLinks()
         {
             for (int armIndex = 0; armIndex < m_attackArmLinks.Length; armIndex++)
@@ -296,10 +378,12 @@ namespace Player7654321
             }
         }
 
-        /// <summary>砲塔が敵に触れて機体を弾き飛ばさないよう、接触だけを無効にする。</summary>
+        /// <summary>攻撃腕が砲弾以外と接触して機体を弾き飛ばさないようにする。</summary>
         private void IgnoreArmRamCollisions()
         {
             if (m_stabilityBody == null) return;
+            if (Time.time < m_nextArmCollisionRefreshAt) return;
+            m_nextArmCollisionRefreshAt = Time.time + ARM_COLLISION_REFRESH_INTERVAL;
 
             Collider[] sceneColliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
             for (int turretId = 0; turretId < m_turretParts.Length; turretId++)
@@ -314,20 +398,56 @@ namespace Player7654321
                     foreach (Collider sceneCollider in sceneColliders)
                     {
                         if (sceneCollider == null || sceneCollider.attachedRigidbody == m_stabilityBody) continue;
-                        BaseTank otherTank = sceneCollider.GetComponentInParent<BaseTank>();
-                        if (otherTank == null) continue;
+                        // 砲弾との接触は残し、地形・敵車体・落下パーツなどへの物理衝突だけを切る。
+                        if (sceneCollider.gameObject.layer == Constants.OBJ_LAYER_SHELL) continue;
                         Physics.IgnoreCollision(armCollider, sceneCollider, true);
                     }
                 }
             }
         }
 
+        /// <summary>
+        /// BattleTanksManagerが機体の描画メッシュへ追加した複雑な凸MeshColliderを、
+        /// 同じメッシュのローカル境界に合うBoxColliderへ置き換えてPhysX接触計算を軽くする。
+        /// </summary>
+        private void ReplaceOwnConvexMeshesWithBoxes()
+        {
+            MeshCollider[] meshColliders = GetComponentsInChildren<MeshCollider>(true);
+            foreach (MeshCollider meshCollider in meshColliders)
+            {
+                if (meshCollider == null || meshCollider.GetComponentInParent<TurretPart>() != null)
+                    continue;
+
+                Mesh mesh = meshCollider.sharedMesh;
+                if (mesh == null) continue;
+
+                // MeshColliderと同じTransform上で、元メッシュのboundsを使って近似箱を作る。
+                Bounds bounds = mesh.bounds;
+                BoxCollider boxCollider = meshCollider.GetComponent<BoxCollider>();
+                if (boxCollider == null)
+                    boxCollider = meshCollider.gameObject.AddComponent<BoxCollider>();
+                boxCollider.center = bounds.center;
+                boxCollider.size = new Vector3(
+                    Mathf.Max(bounds.size.x, 0.02f),
+                    Mathf.Max(bounds.size.y, 0.02f),
+                    Mathf.Max(bounds.size.z, 0.02f));
+                boxCollider.isTrigger = meshCollider.isTrigger;
+                boxCollider.enabled = meshCollider.enabled;
+
+                // Destroyはフレーム末尾に実行されるため、先に無効化して同時接触を防ぐ。
+                meshCollider.enabled = false;
+                Destroy(meshCollider);
+            }
+        }
+
+        /// <summary>指定した腕のリンク配列を返し、範囲外の番号にはnullを返す。</summary>
         private Transform[] GetAttackArmLinks(int armIndex)
         {
             if (armIndex < 0 || armIndex >= m_attackArmLinks.Length) return null;
             return m_attackArmLinks[armIndex];
         }
 
+        /// <summary>腕の伸縮量を速度制限付きで更新し、各リンクと砲塔を配置する。</summary>
         private void SetAttackArmLength(int armIndex, Transform[] links, Transform turretTransform, float targetLength, float pitchAngle)
         {
             if (armIndex < 0 || armIndex >= m_attackArmLengths.Length || links == null || links.Length == 0) return;
@@ -354,6 +474,7 @@ namespace Player7654321
             turretTransform.localPosition = forward * length;
         }
 
+        /// <summary>腕の中心線上にジグザグ形状を作るための指定位置を計算する。</summary>
         private Vector3 GetAttackArmPoint(int pointIndex, int linkCount, float length, Vector3 forward, int armIndex)
         {
             float progress = (float)pointIndex / linkCount;
@@ -367,11 +488,13 @@ namespace Player7654321
             return forward * (length * progress) + Vector3.right * offset;
         }
 
+        /// <summary>基底クラスから受け取った回転ジョイント一覧を保存する。</summary>
         private void CacheRotJointReferences(RotJointPart[] joints)
         {
             m_rotJointParts = joints ?? new RotJointPart[0];
         }
 
+        /// <summary>Inspectorのジョイント参照を配列番号へ変換し、未指定なら既定番号を使う。</summary>
         private void ResolveAttackArmJointIds()
         {
             m_leftAttackArmJointId = FindRotJointId(m_leftAttackArmJoint, DEFAULT_LEFT_ATTACK_ARM_JOINT_ID);
@@ -379,6 +502,7 @@ namespace Player7654321
             m_centerAttackArmJointId = FindRotJointId(m_centerAttackArmJoint, DEFAULT_CENTER_ATTACK_ARM_JOINT_ID);
         }
 
+        /// <summary>指定されたジョイントの配列番号を検索し、見つからなければ既定番号を返す。</summary>
         private int FindRotJointId(RotJointPart selectedJoint, int fallbackId)
         {
             if (selectedJoint == null) return fallbackId;
@@ -391,6 +515,7 @@ namespace Player7654321
             return fallbackId;
         }
 
+        /// <summary>腕番号に対応する回転ジョイント番号を返す。</summary>
         private int GetAttackArmJointId(int armIndex)
         {
             switch (armIndex)
@@ -402,16 +527,19 @@ namespace Player7654321
             }
         }
 
+        /// <summary>ジョイント番号が配列内にあり、参照先が有効か確認する。</summary>
         private bool IsValidAttackArmJointId(int jointId)
         {
             return jointId >= 0 && jointId < m_rotJointParts.Length && m_rotJointParts[jointId] != null;
         }
 
+        /// <summary>基底クラスから受け取った砲塔一覧を保存する。</summary>
         private void CacheTurretReferences(TurretPart[] turrets)
         {
             m_turretParts = turrets ?? new TurretPart[0];
         }
 
+        /// <summary>Inspectorで選択した3本の攻撃砲塔を配列番号へ解決する。</summary>
         private void ResolveAttackArmTurretIds()
         {
             m_leftArmTurretId = FindTurretId(m_leftArmTurret, DEFAULT_LEFT_ARM_TURRET_ID);
@@ -427,6 +555,7 @@ namespace Player7654321
             OrientAttackArmTurretOutward(m_centerArmTurretId);
         }
 
+        /// <summary>指定された攻撃砲塔の初期回転を外向きにし、姿勢制御砲塔は変更しない。</summary>
         private void OrientAttackArmTurretOutward(int turretId)
         {
             if (turretId < 0 || turretId >= m_turretParts.Length || m_turretParts[turretId] == null)
@@ -437,12 +566,14 @@ namespace Player7654321
             m_turretParts[turretId].transform.localRotation = Quaternion.identity;
         }
 
+        /// <summary>Inspectorで選択した姿勢制御砲塔を配列番号へ解決する。</summary>
         private void ResolveAttitudeTurretIds()
         {
             m_leftAttitudeTurretId = FindTurretId(m_leftAttitudeTurret, DEFAULT_LEFT_ATTITUDE_TURRET_ID);
             m_rightAttitudeTurretId = FindTurretId(m_rightAttitudeTurret, DEFAULT_RIGHT_ATTITUDE_TURRET_ID);
         }
 
+        /// <summary>指定された砲塔の配列番号を検索し、見つからなければ既定番号を返す。</summary>
         private int FindTurretId(TurretPart selectedTurret, int fallbackId)
         {
             if (selectedTurret == null) return fallbackId;
@@ -526,6 +657,7 @@ namespace Player7654321
             }
         }
 
+        /// <summary>指定番号が3本の攻撃腕のいずれかに割り当てられているか判定する。</summary>
         private bool IsAttackArmTurret(int turretId)
         {
             return turretId == m_leftArmTurretId
@@ -533,16 +665,19 @@ namespace Player7654321
                 || turretId == m_centerArmTurretId;
         }
 
+        /// <summary>指定番号が下向き姿勢制御用の砲塔か判定する。</summary>
         private bool IsAttitudeControlTurret(int turretId)
         {
             return turretId == m_leftAttitudeTurretId || turretId == m_rightAttitudeTurretId;
         }
 
+        /// <summary>姿勢制御砲塔番号と配列内の参照が有効か確認する。</summary>
         private bool IsValidAttitudeTurretId(int turretId)
         {
             return turretId >= 0 && turretId < m_turretParts.Length && m_turretParts[turretId] != null;
         }
 
+        /// <summary>腕が標的まで伸び切ってから攻撃砲塔を撃てるか判定する。</summary>
         private bool IsAttackArmReadyToShoot(int turretId, int targetId, TankInfo[] tanks)
         {
             int armIndex = GetAttackArmIndexForTurret(turretId);
@@ -559,6 +694,7 @@ namespace Player7654321
             return m_attackArmLengths[armIndex] >= requiredLength - 1.0f;
         }
 
+        /// <summary>攻撃砲塔番号に対応する腕番号を返す。</summary>
         private int GetAttackArmIndexForTurret(int turretId)
         {
             if (turretId == m_leftArmTurretId) return 0;
@@ -567,6 +703,7 @@ namespace Player7654321
             return -1;
         }
 
+        /// <summary>標的番号が有効で、敵が撃破済みでも無敵状態でもないか確認する。</summary>
         private bool IsTargetable(TankInfo[] tanks, int targetId)
         {
             return tanks != null
@@ -656,6 +793,7 @@ namespace Player7654321
             }
         }
 
+        /// <summary>敵の速度と弾の飛行時間から先読み位置を求め、中心高さを加える。</summary>
         private Vector3 GetPredictedAimPoint(TankInfo enemy, int enemyId)
         {
             Vector3 predictedPosition = enemy.Position;
@@ -685,6 +823,7 @@ namespace Player7654321
             DriveToward(-flatPosition.normalized);
         }
 
+        /// <summary>車体の向きを考慮し、指定方向へ旋回しながら移動する。</summary>
         private void DriveToward(Vector3 desiredDirection)
         {
             desiredDirection = Flatten(desiredDirection);
@@ -715,6 +854,7 @@ namespace Player7654321
                 Mathf.Clamp(drive - steer * 0.75f, -1.0f, 1.0f));
         }
 
+        /// <summary>左右のキャタピラ出力をゼロにして通常時の移動を止める。</summary>
         private void StopMovement()
         {
             SXG_SetCaterpillarPower(0.0f, 0.0f);
@@ -753,6 +893,7 @@ namespace Player7654321
             m_nextShotAt = Time.time + SHOT_STAGGER_INTERVAL;
         }
 
+        /// <summary>参加人数が増減した時に敵追跡データ配列の容量を合わせる。</summary>
         private void EnsureTrackStorage(int requiredCount)
         {
             if (m_enemyTracks != null && m_enemyTracks.Length >= requiredCount) return;
@@ -763,6 +904,7 @@ namespace Player7654321
             m_enemyTracks = expanded;
         }
 
+        /// <summary>砲塔数に合わせて標的割当配列を作り直し、未割当状態に初期化する。</summary>
         private void EnsureTurretTargets(int turretCount)
         {
             if (m_targetByTurret.Length == turretCount) return;
@@ -776,12 +918,14 @@ namespace Player7654321
             }
         }
 
+        /// <summary>ベクトルの高さ成分をゼロにし、水平面上の値にする。</summary>
         private static Vector3 Flatten(Vector3 value)
         {
             value.y = 0.0f;
             return value;
         }
 
+        /// <summary>機体の上方向から、直立状態へ戻す回転誤差ベクトルを求める。</summary>
         private static Vector3 GetUprightRotationError(Transform bodyTransform)
         {
             Vector3 bodyUp = bodyTransform.up;
