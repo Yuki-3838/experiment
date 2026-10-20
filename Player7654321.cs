@@ -181,8 +181,7 @@ namespace Player7654321
         {
             m_legExtensionStartedAt = Time.time;
             m_nextShotAt = Time.time;
-            // このスクリプトはBaseTankの子オブジェクトに付くため、Rigidbodyは親から取得する。
-            m_stabilityBody = GetComponentInParent<Rigidbody>();
+            m_stabilityBody = GetComponent<Rigidbody>();
             if (m_stabilityBody != null)
             {
                 m_stabilityBody.linearDamping = Mathf.Max(m_stabilityBody.linearDamping, STABILIZER_LINEAR_DAMPING);
