@@ -386,6 +386,8 @@ namespace Player7654321
             m_nextArmCollisionRefreshAt = Time.time + ARM_COLLISION_REFRESH_INTERVAL;
 
             Collider[] sceneColliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
+            IgnoreBoxConvexContacts(sceneColliders);
+
             for (int turretId = 0; turretId < m_turretParts.Length; turretId++)
             {
                 if (!IsAttackArmTurret(turretId)) continue;
@@ -397,11 +399,45 @@ namespace Player7654321
                     if (armCollider == null) continue;
                     foreach (Collider sceneCollider in sceneColliders)
                     {
-                        if (sceneCollider == null || sceneCollider.attachedRigidbody == m_stabilityBody) continue;
+                        if (sceneCollider == null
+                            || sceneCollider == armCollider
+                            || sceneCollider.attachedRigidbody == m_stabilityBody) continue;
                         // 砲弾との接触は残し、地形・敵車体・落下パーツなどへの物理衝突だけを切る。
                         if (sceneCollider.gameObject.layer == Constants.OBJ_LAYER_SHELL) continue;
                         Physics.IgnoreCollision(armCollider, sceneCollider, true);
                     }
+                }
+            }
+        }
+
+        /// <summary>
+        /// PhysXの Box-Convex 接触処理でクラッシュしないよう、
+        /// この機体に関係するBoxColliderと凸MeshColliderの組み合わせだけを除外する。
+        /// 砲弾はCapsuleColliderなのでこの除外の対象にならない。
+        /// </summary>
+        private void IgnoreBoxConvexContacts(Collider[] sceneColliders)
+        {
+            Collider[] ownColliders = GetComponentsInChildren<Collider>(true);
+            foreach (Collider ownCollider in ownColliders)
+            {
+                if (ownCollider == null || !ownCollider.enabled) continue;
+
+                MeshCollider ownMesh = ownCollider as MeshCollider;
+                foreach (Collider sceneCollider in sceneColliders)
+                {
+                    if (sceneCollider == null
+                        || sceneCollider == ownCollider
+                        || !sceneCollider.enabled
+                        || sceneCollider.transform == transform
+                        || sceneCollider.transform.IsChildOf(transform)
+                        || sceneCollider.gameObject.layer == Constants.OBJ_LAYER_SHELL) continue;
+
+                    MeshCollider sceneMesh = sceneCollider as MeshCollider;
+                    bool boxAgainstConvexMesh =
+                        (ownCollider is BoxCollider && sceneMesh != null && sceneMesh.convex)
+                        || (sceneCollider is BoxCollider && ownMesh != null && ownMesh.convex);
+                    if (boxAgainstConvexMesh)
+                        Physics.IgnoreCollision(ownCollider, sceneCollider, true);
                 }
             }
         }
