@@ -252,7 +252,10 @@ namespace Player7654321
                 UpdateEnemyTracks(tanks);
             }
 
-            ExtendLegsForHeight();
+            if (IsSelfInvincible(tanks))
+                m_legExtensionStartedAt += Time.deltaTime;
+            else
+                ExtendLegsForHeight();
 
             // キャタピラは通常止め、外周へ流されたときだけ水平に戻す。
             RecoverFromFieldEdge();
@@ -281,9 +284,23 @@ namespace Player7654321
                 || !IsValidAttackArmJointId(m_rightAttackArmJointId)
                 || !IsValidAttackArmJointId(m_centerAttackArmJointId)) return;
 
+            if (IsSelfInvincible(tanks))
+            {
+                RetractAttackArm(0, m_leftAttackArmJointId, m_leftArmTurretId, 70.0f);
+                RetractAttackArm(1, m_rightAttackArmJointId, m_rightArmTurretId, -70.0f);
+                RetractAttackArm(2, m_centerAttackArmJointId, m_centerArmTurretId, 180.0f);
+                return;
+            }
+
             AimAttackArm(tanks, 0, m_leftAttackArmJointId, m_leftArmTurretId, 70.0f);
             AimAttackArm(tanks, 1, m_rightAttackArmJointId, m_rightArmTurretId, -70.0f);
             AimAttackArm(tanks, 2, m_centerAttackArmJointId, m_centerArmTurretId, 180.0f);
+        }
+
+        /// <summary>TankInfo配列先頭にある自機の無敵状態を返す。</summary>
+        private static bool IsSelfInvincible(TankInfo[] tanks)
+        {
+            return tanks != null && tanks.Length > 0 && tanks[0].IsInvincible;
         }
 
         /// <summary>指定した攻撃腕を標的の中心へ向け、先端砲塔が届く長さまで伸ばす。</summary>
