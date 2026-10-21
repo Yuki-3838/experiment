@@ -181,12 +181,17 @@ namespace Player7654321
         {
             m_legExtensionStartedAt = Time.time;
             m_nextShotAt = Time.time;
-            m_stabilityBody = GetComponent<Rigidbody>();
+            // Player AI is a child of BaseTank; the Rigidbody lives on that parent object.
+            m_stabilityBody = GetComponentInParent<Rigidbody>();
             if (m_stabilityBody != null)
             {
                 m_stabilityBody.linearDamping = Mathf.Max(m_stabilityBody.linearDamping, STABILIZER_LINEAR_DAMPING);
                 m_stabilityBody.angularDamping = Mathf.Max(m_stabilityBody.angularDamping, STABILIZER_ANGULAR_DAMPING);
                 m_stabilityBody.maxAngularVelocity = Mathf.Min(m_stabilityBody.maxAngularVelocity, MAX_STABILIZED_ANGULAR_SPEED);
+            }
+            else
+            {
+                Debug.LogError("Player7654321 could not find the parent BaseTank Rigidbody; stabilization and collision control are disabled.", this);
             }
             GetRotJoints(CacheRotJointReferences);
             GetTurrets(CacheTurretReferences);
@@ -445,6 +450,7 @@ namespace Player7654321
                     if (sceneCollider == null
                         || sceneCollider == ownCollider
                         || !sceneCollider.enabled
+                        || sceneCollider.attachedRigidbody == m_stabilityBody
                         || sceneCollider.transform == transform
                         || sceneCollider.transform.IsChildOf(transform)
                         || sceneCollider.gameObject.layer == Constants.OBJ_LAYER_SHELL) continue;
@@ -740,10 +746,12 @@ namespace Player7654321
             if (!IsValidAttackArmJointId(jointId) || m_attackArmLinks[armIndex] == null) return false;
 
             Vector3 targetPosition = GetPredictedAimPoint(tanks[targetId], targetId);
-            float requiredLength = Mathf.Clamp(
-                Vector3.Distance(m_rotJointParts[jointId].transform.position, targetPosition) + 0.8f,
-                MIN_ATTACK_ARM_LENGTH,
-                MAX_ATTACK_ARM_LENGTH);
+            float requiredLength = Vector3.Distance(
+                m_rotJointParts[jointId].transform.position,
+                targetPosition) + 0.8f;
+            // Never fire an arm as if it had reached the target when the target is beyond its limit.
+            if (requiredLength > MAX_ATTACK_ARM_LENGTH) return false;
+            requiredLength = Mathf.Max(requiredLength, MIN_ATTACK_ARM_LENGTH);
             return m_attackArmLengths[armIndex] >= requiredLength - 1.0f;
         }
 
