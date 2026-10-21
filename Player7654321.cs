@@ -379,8 +379,7 @@ namespace Player7654321
 
                 Transform[] links = new Transform[ATTACK_ARM_LINK_COUNT];
                 links[0] = firstLink;
-                Collider firstCollider = firstLink.GetComponent<Collider>();
-                if (firstCollider != null) firstCollider.enabled = false;
+                DisableAttackArmLinkColliders(firstLink);
 
                 for (int linkIndex = 1; linkIndex < links.Length; linkIndex++)
                 {
@@ -390,14 +389,21 @@ namespace Player7654321
                     link.localPosition = Vector3.zero;
                     link.localRotation = Quaternion.identity;
                     link.localScale = new Vector3(ATTACK_ARM_LINK_THICKNESS, ATTACK_ARM_LINK_THICKNESS, 1.0f);
-                    Collider linkCollider = linkObject.GetComponent<Collider>();
-                    if (linkCollider != null) linkCollider.enabled = false;
+                    DisableAttackArmLinkColliders(link);
                     links[linkIndex] = link;
                 }
 
                 m_attackArmLinks[armIndex] = links;
                 m_attackArmLengths[armIndex] = Mathf.Max(firstLink.localScale.z, MIN_ATTACK_ARM_LENGTH);
             }
+        }
+
+        /// <summary>再出撃直後に同居する旧Box・新Meshを含め、見た目用リンクの全Colliderを無効化する。</summary>
+        private static void DisableAttackArmLinkColliders(Transform link)
+        {
+            // GetComponentでは1個しか取得できず、複製された未計量リンクに当たり判定が残る。
+            foreach (Collider linkCollider in link.GetComponents<Collider>())
+                linkCollider.enabled = false;
         }
 
         /// <summary>攻撃腕が砲弾以外と接触して機体を弾き飛ばさないようにする。</summary>
@@ -482,9 +488,14 @@ namespace Player7654321
 
                 // MeshColliderと同じTransform上で、元メッシュのboundsを使って近似箱を作る。
                 Bounds bounds = mesh.bounds;
-                BoxCollider boxCollider = meshCollider.GetComponent<BoxCollider>();
-                if (boxCollider == null)
-                    boxCollider = meshCollider.gameObject.AddComponent<BoxCollider>();
+                // 再出撃時の既存BoxはManagerがDestroy予約している場合があるため再利用しない。
+                // 再利用するとフレーム末尾に交換後の装甲Colliderまで消える。
+                foreach (BoxCollider previousBox in meshCollider.GetComponents<BoxCollider>())
+                {
+                    previousBox.enabled = false;
+                    Destroy(previousBox);
+                }
+                BoxCollider boxCollider = meshCollider.gameObject.AddComponent<BoxCollider>();
                 boxCollider.center = bounds.center;
                 boxCollider.size = new Vector3(
                     Mathf.Max(bounds.size.x, 0.02f),
