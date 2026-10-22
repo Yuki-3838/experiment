@@ -58,7 +58,11 @@ SXG_PlayerTanksの6機から相手3機を選ぶ通常4人戦で、全20組み合
 
 元のUnityプロジェクト直下から `git apply --check /path/to/stability-fixes.patch` で適用可否を確認し、未適用なら `git apply /path/to/stability-fixes.patch` で適用できます。相手AIと相手Prefabのファイルは変更していません。
 
-## 検証済みファイルのSHA-256
+## 対戦検証時点のファイルとSHA-256
+
+AIスクリプトには、検証後に各処理の意図・数値の単位・判断条件の日本語コメントを追加しています。実行処理は同じですが、コメントの追加で現在の `.cs` のファイルハッシュは変わっています。
+
+以下は対戦に使った原本のハッシュです。原本は [検証時点のコミット](https://github.com/Yuki-3838/experiment/tree/9cd39c103530f5e3bc056842e9c3bf62e4304248/Astraeus) に保存しています。`results/acceptance.json` も検証時点の記録です。Prefabの内容は同じです。
 
 ```text
 Astraeus.cs

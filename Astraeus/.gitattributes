@@ -1,4 +1,4 @@
-# Keep validated source/prefab bytes unchanged so SHA-256 matches on every OS.
+# Preserve source/prefab bytes across checkout so hashes match on every OS.
 Astraeus.cs -text
 Astraeus.prefab -text
 stability-fixes.patch -text
