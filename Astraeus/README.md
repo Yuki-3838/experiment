@@ -37,6 +37,12 @@ Astraeus                         ← Astraeus.Astraeus を付ける
 
 AIの `m_turrets` には Gun_0、Gun_1、Gun_2 の順に3基、`m_rotJoints` には FireControlRing を1基登録します。保存済みPrefabには登録済みです。
 
+### 砲口取得の互換性
+
+`TurretPart.GetTopPositionAndRotation` が外部から呼べない配布版に対応するため、現在のAIは標準Prefabの `JointYawRotTr/JointPitchRotTr/BarrelTop/BarrelTopTr` を取得し、その `Transform.position` と `Transform.rotation` を参照します。標準Prefabではゲーム本体の発射位置と同じTransformです。参照は初期化時にキャッシュします。
+
+砲台の子の名前や階層を独自に変更した場合は、`Astraeus.cs` の `MUZZLE_TRANSFORM_PATH` を実際の砲口に合わせてください。
+
 ## AIの動作
 
 - 観測した敵の速度と旋回を推定し、各砲口からの弾道で偏差射撃します。
@@ -60,7 +66,7 @@ SXG_PlayerTanksの6機から相手3機を選ぶ通常4人戦で、全20組み合
 
 ## 対戦検証時点のファイルとSHA-256
 
-AIスクリプトには、検証後に各処理の意図・数値の単位・判断条件の日本語コメントを追加しています。実行処理は同じですが、コメントの追加で現在の `.cs` のファイルハッシュは変わっています。
+AIスクリプトには、検証後に日本語コメントを追加し、砲口の取得を標準PrefabのTransform参照に置き換えています。この取得方法は `GetTopPositionAndRotation` の公開範囲に依存せず、標準Prefabで同じ砲口の位置・回転を読みます。現在の `.cs` のファイルハッシュは検証時点と異なります。掲載している480試合は変更前の原本による記録です。
 
 以下は対戦に使った原本のハッシュです。原本は [検証時点のコミット](https://github.com/Yuki-3838/experiment/tree/9cd39c103530f5e3bc056842e9c3bf62e4304248/Astraeus) に保存しています。`results/acceptance.json` も検証時点の記録です。Prefabの内容は同じです。
 

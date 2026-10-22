@@ -16,6 +16,9 @@ namespace Astraeus
         private const int PLAYER_COUNT = 4;                  // APIの配列は[0]が自分、[1]～[3]が敵。
         private const float SHELL_SPEED = 38.0f;             // 標準砲弾の初速。弾道計算と到達時間に使う。
         private const float SHELL_GRAVITY_SCALE = 2.0f;      // 標準砲弾に加わる重力はPhysics.gravityの2倍。
+        // 標準TurretPart.prefabで、ゲーム本体が発射位置として使う砲口Transformの階層。
+        // TurretPart.GetTopPositionAndRotationがinternalの配布版でも、このTransformは参照できる。
+        private const string MUZZLE_TRANSFORM_PATH = "JointYawRotTr/JointPitchRotTr/BarrelTop/BarrelTopTr";
         private const float AIM_HEIGHT_OFFSET = 0.5f;        // 現在未使用の旧照準補助関数だけで使う高さ。
         private const float MAX_TRACKED_SPEED = 22.0f;       // 速度推定の上限。位置の飛びで予測が暴れないようにする。
 
@@ -51,6 +54,7 @@ namespace Astraeus
 
         // 自分の姿勢と敵の追跡状態。敵IDはSXG_GetAllTanksInfoの配列添字を使う。
         private TurretPart[] m_cachedTurrets = new TurretPart[0];
+        private Transform[] m_cachedMuzzles = new Transform[0]; // 砲台配列と同じ順番で保持する実際の砲口。
         private readonly EnemyTrack[] m_enemyTracks = new EnemyTrack[PLAYER_COUNT];
         private Vector3 m_selfPosition;
         private Quaternion m_selfRotation;
@@ -131,10 +135,22 @@ namespace Astraeus
             }
         }
 
-        /// <summary>GetTurretsの取得結果を保存する。取得できなければ空配列で扱う。</summary>
+        /// <summary>砲台と砲口を同じ順で保存する。Transformの階層検索は取得時の1回だけ行う。</summary>
         private void CacheTurrets(TurretPart[] turrets)
         {
             m_cachedTurrets = turrets ?? new TurretPart[0];
+            m_cachedMuzzles = new Transform[m_cachedTurrets.Length];
+            for (int id = 0; id < m_cachedTurrets.Length; id++)
+            {
+                if (m_cachedTurrets[id] == null)
+                    continue;
+
+                // メソッドの公開範囲に依存せず、標準Prefabの発射位置そのものを取得する。
+                // Transform参照は旋回後も有効なので、毎フレームの位置と回転は常に最新になる。
+                m_cachedMuzzles[id] = m_cachedTurrets[id].transform.Find(MUZZLE_TRANSFORM_PATH);
+                if (m_cachedMuzzles[id] == null)
+                    Debug.LogWarning("Astraeus: 砲台 " + id + " の砲口が見つかりません。標準TurretPartの階層を確認してください。", this);
+            }
         }
 
         /// <summary>位置差分を平滑化して、敵の平面移動と突進を追跡する。</summary>
@@ -217,9 +233,9 @@ namespace Astraeus
                     continue;
 
                 // 先頭砲台の位置から、急所を狙った時の着弾先の評価を更新する。
-                if (m_cachedTurrets.Length > 0 && m_cachedTurrets[0] != null)
+                if (m_cachedMuzzles.Length > 0 && m_cachedMuzzles[0] != null)
                 {
-                    m_cachedTurrets[0].GetTopPositionAndRotation(out Vector3 probeOrigin, out _);
+                    Vector3 probeOrigin = m_cachedMuzzles[0].position;
                     FindWeakPoint(enemy, probeOrigin, id);
                 }
 
@@ -290,7 +306,11 @@ namespace Astraeus
                 if (turret == null || !turret.isActiveAndEnabled)
                     continue;
 
-                turret.GetTopPositionAndRotation(out Vector3 muzzlePosition, out Quaternion muzzleRotation);
+                Transform muzzle = m_cachedMuzzles[turretId];
+                if (muzzle == null)
+                    continue;
+                Vector3 muzzlePosition = muzzle.position;
+                Quaternion muzzleRotation = muzzle.rotation;
                 Vector3 offset = FindWeakPoint(enemy, muzzlePosition, m_targetId);
                 Vector3 aimPoint = enemy.Position + offset;
                 Vector3 requiredDirection = Vector3.zero;
