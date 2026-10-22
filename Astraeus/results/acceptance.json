@@ -1,0 +1,769 @@
+{
+  "passed": true,
+  "name": "helios-v6-validation480",
+  "tankName": "Astraeus Helios",
+  "evaluatedAt": "2026-10-22 10:24:58 +09:00",
+  "plannedCases": 480,
+  "completed": 480,
+  "errorsCountedAsLoss": 0,
+  "minimumWinRate": 87.5,
+  "totalWins": 468.0,
+  "candidateCost": 319,
+  "turrets": 3,
+  "joints": 1,
+  "deployments": 3,
+  "fps": 60,
+  "speed": 1,
+  "artifacts": [
+    {
+      "file": "Astraeus.cs",
+      "sha256": "C1B7BCFEECE89E5030BD84136D9573C489881E6574878E9E45E35892FE90C249"
+    },
+    {
+      "file": "Astraeus.prefab",
+      "sha256": "6D1C943BEAF87861BA8DE9F99C6108B49BA8028454697FDC5F756D6EA3723BE5"
+    }
+  ],
+  "combinations": [
+    {
+      "combo": 0,
+      "opponents": [
+        "Player6407639",
+        "Player6440271",
+        "Player6446482"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 1,
+      "opponents": [
+        "Player6407639",
+        "Player6440271",
+        "Player6451913"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 2,
+      "opponents": [
+        "Player6407639",
+        "Player6440271",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 23,
+      "draws": 0,
+      "rate": 95.83333333333333,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 3,
+      "opponents": [
+        "Player6407639",
+        "Player6440271",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 4,
+      "opponents": [
+        "Player6407639",
+        "Player6446482",
+        "Player6451913"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 23,
+      "draws": 0,
+      "rate": 95.83333333333333,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 5,
+      "opponents": [
+        "Player6407639",
+        "Player6446482",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 6,
+      "opponents": [
+        "Player6407639",
+        "Player6446482",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 7,
+      "opponents": [
+        "Player6407639",
+        "Player6451913",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 22,
+      "draws": 0,
+      "rate": 91.66666666666667,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 5
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 8,
+      "opponents": [
+        "Player6407639",
+        "Player6451913",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 23,
+      "draws": 0,
+      "rate": 95.83333333333333,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 9,
+      "opponents": [
+        "Player6407639",
+        "Player6451924",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 10,
+      "opponents": [
+        "Player6440271",
+        "Player6446482",
+        "Player6451913"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 22,
+      "draws": 0,
+      "rate": 91.66666666666667,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 5
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 11,
+      "opponents": [
+        "Player6440271",
+        "Player6446482",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 12,
+      "opponents": [
+        "Player6440271",
+        "Player6446482",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 23,
+      "draws": 0,
+      "rate": 95.83333333333333,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 5
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 13,
+      "opponents": [
+        "Player6440271",
+        "Player6451913",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 21,
+      "draws": 0,
+      "rate": 87.5,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 5
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 4
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 14,
+      "opponents": [
+        "Player6440271",
+        "Player6451913",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 15,
+      "opponents": [
+        "Player6440271",
+        "Player6451924",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 16,
+      "opponents": [
+        "Player6446482",
+        "Player6451913",
+        "Player6451924"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 23,
+      "draws": 0,
+      "rate": 95.83333333333333,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 5
+        }
+      ]
+    },
+    {
+      "combo": 17,
+      "opponents": [
+        "Player6446482",
+        "Player6451913",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 18,
+      "opponents": [
+        "Player6446482",
+        "Player6451924",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    },
+    {
+      "combo": 19,
+      "opponents": [
+        "Player6451913",
+        "Player6451924",
+        "Player6451943"
+      ],
+      "cases": 24,
+      "completed": 24,
+      "errorsCountedAsLoss": 0,
+      "wins": 24,
+      "draws": 0,
+      "rate": 100,
+      "passed": true,
+      "seats": [
+        {
+          "seat": 0,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 1,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 2,
+          "cases": 6,
+          "wins": 6
+        },
+        {
+          "seat": 3,
+          "cases": 6,
+          "wins": 6
+        }
+      ]
+    }
+  ]
+}
