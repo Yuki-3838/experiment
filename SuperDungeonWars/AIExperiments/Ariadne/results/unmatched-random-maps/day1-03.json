@@ -1,0 +1,43 @@
+{
+    "version": "day1",
+    "utc": "2026-10-23T03:53:09.9709905Z",
+    "unity": "6000.3.24f1",
+    "mode": "Ariadne",
+    "reason": "AllTreasuresExported",
+    "seed": 24680,
+    "slot": 2,
+    "errors": 0,
+    "simulatedSeconds": 74.23955535888672,
+    "wallSeconds": 9.213086599999997,
+    "teams": [
+        {
+            "name": "AggressiveParty",
+            "slot": 0,
+            "rank": 1,
+            "value": 563,
+            "chests": 4
+        },
+        {
+            "name": "StrategicParty",
+            "slot": 1,
+            "rank": 4,
+            "value": 293,
+            "chests": 3
+        },
+        {
+            "name": "Party1111111Party",
+            "slot": 2,
+            "rank": 2,
+            "value": 305,
+            "chests": 3
+        },
+        {
+            "name": "ConvoyParty",
+            "slot": 3,
+            "rank": 3,
+            "value": 300,
+            "chests": 3
+        }
+    ],
+    "errorMessages": []
+}

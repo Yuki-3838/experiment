@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9c4070fa307f7324bae3ff3a12f79960, type: 3}
+  m_Name: BattlePartyRegistry
+  m_EditorClassIdentifier: Dungeon.GameSystem::BattlePartyRegistry
+  m_partyPrefabs:
+  - {fileID: 4927423371497504121, guid: 66caf0c4ad32bd046a1a2626dda8c961, type: 3}
+  - {fileID: 2779356007411327926, guid: 697dedb64c601b146a7ff140ad1add57, type: 3}
+  - {fileID: 1486822908554745773, guid: aac3ad537961ea247935d4181a1b4fe4, type: 3}
+  - {fileID: 4428357777061226519, guid: 8df5b2f410f1c404dbb8336c5cc52158, type: 3}

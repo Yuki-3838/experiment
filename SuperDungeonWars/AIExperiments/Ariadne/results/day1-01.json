@@ -1,0 +1,44 @@
+{
+    "version": "day1",
+    "utc": "2026-10-23T03:56:52.1989486Z",
+    "unity": "6000.3.24f1",
+    "mode": "Ariadne",
+    "reason": "TimeLimitReached",
+    "seed": 1041505397,
+    "actualSeed": 1041505397,
+    "slot": 2,
+    "errors": 0,
+    "simulatedSeconds": 120.0,
+    "wallSeconds": 13.684861399999999,
+    "teams": [
+        {
+            "name": "AggressiveParty",
+            "slot": 0,
+            "rank": 2,
+            "value": 477,
+            "chests": 5
+        },
+        {
+            "name": "StrategicParty",
+            "slot": 1,
+            "rank": 3,
+            "value": 448,
+            "chests": 5
+        },
+        {
+            "name": "Party1111111Party",
+            "slot": 2,
+            "rank": 1,
+            "value": 658,
+            "chests": 5
+        },
+        {
+            "name": "ConvoyParty",
+            "slot": 3,
+            "rank": 4,
+            "value": 333,
+            "chests": 3
+        }
+    ],
+    "errorMessages": []
+}

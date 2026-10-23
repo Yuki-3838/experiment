@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-23",
+  "unity": "6000.3.24f1",
+  "upstreamCommit": "734d485e69e4e1da9322ea1f633c234bef44c19c",
+  "stepSeconds": 0.02,
+  "results": [
+    {
+      "index": 0,
+      "mode": "Ariadne",
+      "seed": 1041505397,
+      "slot": 0,
+      "rank": 3,
+      "value": 353,
+      "chests": 4,
+      "errors": 0
+    },
+    {
+      "index": 1,
+      "mode": "Ariadne",
+      "seed": 1041505397,
+      "slot": 2,
+      "rank": 1,
+      "value": 658,
+      "chests": 5,
+      "errors": 0
+    },
+    {
+      "index": 2,
+      "mode": "Ariadne",
+      "seed": 1013712272,
+      "slot": 0,
+      "rank": 4,
+      "value": 164,
+      "chests": 2,
+      "errors": 0
+    },
+    {
+      "index": 3,
+      "mode": "Ariadne",
+      "seed": 1013712272,
+      "slot": 2,
+      "rank": 1,
+      "value": 556,
+      "chests": 4,
+      "errors": 0
+    },
+    {
+      "index": 4,
+      "mode": "TreasureReturn",
+      "seed": 1041505397,
+      "slot": 0,
+      "rank": 1,
+      "value": 477,
+      "chests": 5,
+      "errors": 0
+    },
+    {
+      "index": 5,
+      "mode": "TreasureReturn",
+      "seed": 1041505397,
+      "slot": 2,
+      "rank": 4,
+      "value": 403,
+      "chests": 4,
+      "errors": 0
+    },
+    {
+      "index": 6,
+      "mode": "TreasureReturn",
+      "seed": 1013712272,
+      "slot": 0,
+      "rank": 2,
+      "value": 422,
+      "chests": 4,
+      "errors": 0
+    },
+    {
+      "index": 7,
+      "mode": "TreasureReturn",
+      "seed": 1013712272,
+      "slot": 2,
+      "rank": 3,
+      "value": 304,
+      "chests": 3,
+      "errors": 0
+    }
+  ],
+  "aggregates": {
+    "Ariadne": {
+      "matches": 4,
+      "firstPlaces": 2,
+      "meanValue": 432.75,
+      "meanChests": 3.75,
+      "meanRank": 2.25
+    },
+    "TreasureReturn": {
+      "matches": 4,
+      "firstPlaces": 1,
+      "meanValue": 401.5,
+      "meanChests": 4,
+      "meanRank": 2.5
+    }
+  },
+  "sha256": {
+    "Assets/Participants/Party1111111/AriadneMap.cs": "9cbe88ec75daed950d0b59e7d65111d638df2314604a1619db7172d0f8bf8412",
+    "Assets/Participants/Party1111111/Party1111111Party.cs": "9fd5888c45b56e4d78de7f1005ee41060a6505299774e1ad5f03f19e24d16c1d",
+    "Assets/Participants/Party1111111/Party1111111Character.cs": "76b849d00e0a6739049d05dcfd3efa401be743bff1b2e0ce8ab5430e7fb9f440",
+    "Assets/Participants/Party1111111/Party1111111Party.prefab": "126ed7160486b541cff9cca1fbd939417860846cb8e3ac7627d99b6418c6facd",
+    "Assets/Participants/Party1111111/Party1111111Character.prefab": "043337755125a9b83ed3d5b6d45505103ebe22253b026988ac9aeb7a783195b5",
+    "Assets/Participants/Settings/BattlePartyRegistry.asset": "2ec278fa3b03710f26118e93df78f45f75e83d5eb33ee64280bc38c3af6bfa1f",
+    "Assets/Editor/AriadneEvaluation.cs": "91053dad8f7a81588ee60c913a94e9054a81a0f4413ca470853b60b730c9ca80",
+    "Assets/Dungeon/Program/Game/Maze/MazeGenerator.cs": "6e916fa1ac08cec7105181b7a840f144224b885a4e258b2e064702a668d6c674",
+    "Assets/Data/MazeExplore/BattleGameRuleData.asset": "ee516bbef4d27792d38344e9753c4e30bb002609b0f67d559cfca3cd4fefc69c",
+    "ProjectSettings/TagManager.asset": "245c2bfdbea1a6959cb390e10bd4c71eb1cfe31cc532dc800bf714e75d0a127c"
+  }
+}
