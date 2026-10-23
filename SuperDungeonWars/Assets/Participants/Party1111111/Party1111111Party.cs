@@ -16,9 +16,6 @@ namespace Party1111111
         // Dictionaryの列挙中には削除せず、列挙が終わってからまとめて削除する。
         private readonly List<int> expired = new List<int>(), reserved = new List<int>();
         private AriadneMap graph;
-
-        // 同じ大きさでも別の試合のマップなら、前の試合の記憶と作業領域を引き継がない。
-        private KnownMapView planningMap;
         private PartyMemberInfo[] members;
 
         // [メンバー番号][セル番号]。距離の単位はマス、firstStepsは最初に進む隣接セル。
@@ -47,17 +44,20 @@ namespace Party1111111
             nextThink = Time.time + 0.12f;
             KnownMapView map = SXG_GetKnownMap();
             if (map == null) return;
-
-            // メンバー登録やマップの準備が終わっていなければ、次の思考タイミングまで待つ。
-            int count = SXG_GetMemberCount();
-            if (count <= 0 || map.Width <= 0 || map.Height <= 0) return;
-            int cellCount = map.Width * map.Height;
-
-            // graphの有無だけでは初期化済みと判断しない。
-            // 作業用配列やその内側の行が欠けている場合も、ひとまとまりに作り直す。
-            if (!HasPlanningState(map, count, cellCount))
-                InitializePlanningState(map, count, cellCount);
-
+            if (graph == null)
+            {
+                // 初回の思考時に、実際のマップ寸法と部隊人数に合わせて作業領域を用意する。
+                startedAt = Time.time;
+                graph = new AriadneMap(map.Width, map.Height);
+                int count = SXG_GetMemberCount();
+                members = new PartyMemberInfo[count];
+                distances = new int[count][]; firstSteps = new int[count][];
+                goals = new int[count]; assigned = new bool[count];
+                for (int i = 0; i < count; i++)
+                {
+                    distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1;
+                }
+            }
             // 仲間の誰かが新しく観測した通路を取り込み、帰還距離も更新する。
             graph.Refresh(map);
             reserved.Clear();
@@ -150,72 +150,6 @@ namespace Party1111111
                     { length = distances[i][frontier]; target = frontier; }
                 if (target >= 0) Move(i, target); else SXG_StopMember(i);
             }
-        }
-
-        /// <summary>現在のマップ・部隊人数に合う作業領域がすべて揃っているかを調べる。</summary>
-        private bool HasPlanningState(KnownMapView map, int count, int cellCount)
-        {
-            if (!object.ReferenceEquals(planningMap, map)
-                || graph == null || graph.Size != cellCount
-                || members == null || members.Length != count
-                || distances == null || distances.Length != count
-                || firstSteps == null || firstSteps.Length != count
-                || goals == null || goals.Length != count
-                || assigned == null || assigned.Length != count)
-            {
-                return false;
-            }
-
-            // ジャグ配列は外側だけ存在しても、メンバーごとの内側の配列がnullのことがある。
-            for (int i = 0; i < count; i++)
-            {
-                if (distances[i] == null || distances[i].Length != cellCount
-                    || firstSteps[i] == null || firstSteps[i].Length != cellCount)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        /// <summary>
-        /// 全配列をローカル変数で完成させてから、部隊の状態へまとめて反映する。
-        /// 初期化中のforではgraphや未完成のフィールドを参照しない。
-        /// </summary>
-        private void InitializePlanningState(KnownMapView map, int count, int cellCount)
-        {
-            AriadneMap nextGraph = new AriadneMap(map.Width, map.Height);
-            PartyMemberInfo[] nextMembers = new PartyMemberInfo[count];
-            int[][] nextDistances = new int[count][];
-            int[][] nextFirstSteps = new int[count][];
-            int[] nextGoals = new int[count];
-            bool[] nextAssigned = new bool[count];
-
-            // それぞれ別の行にし、どの配列を初期化しているか分かるようにする。
-            for (int i = 0; i < count; i++)
-            {
-                nextDistances[i] = new int[cellCount];
-                nextFirstSteps[i] = new int[cellCount];
-                nextGoals[i] = -1;
-            }
-
-            // 別の試合になったときだけ、経過時間と宝箱の記憶をリセットする。
-            // 同じ試合の配列を復元する場合は、制限時間の起点を延ばさない。
-            if (!object.ReferenceEquals(planningMap, map))
-            {
-                startedAt = Time.time;
-                treasures.Clear();
-                expired.Clear();
-                reserved.Clear();
-            }
-
-            members = nextMembers;
-            distances = nextDistances;
-            firstSteps = nextFirstSteps;
-            goals = nextGoals;
-            assigned = nextAssigned;
-            graph = nextGraph;
-            planningMap = map;
         }
 
         /// <summary>
