@@ -1,6 +1,14 @@
-# SuperDungeonWars — Ariadne
+# SuperDungeonWars — Ariadne 2日目（2026-10-24）
 
 4人で探索・宝箱回収・搬出を分担する参加者AI。2026年10月23日から26日までの4日間で段階的に改善する。
+
+## 2日目の保存版
+
+**開発日: 2026年10月24日 / 2日目 / 回収・搬出の優先度を調整した版。**
+
+[2日目のコードと説明をまとめた固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-day2/SuperDungeonWars)をGitタグ `superdungeonwars-ariadne-day2` に残す。3日目以降の開発が進んでも、このリンクから2日目の3本のAIスクリプトと説明を取り出せる。
+
+実装と評価を保存したコミットは `cc2e6db`。詳しい変更内容と32試合の結果は [2日目の開発記録](AIExperiments/Ariadne/DAY2_RESULTS.md) を参照。
 
 ## 公開するファイル
 
