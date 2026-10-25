@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party1111111
 {
     /// <summary>
-    /// 開発版: 2日目（2026-10-24）。回収・搬出の優先度を調整した保存版。
+    /// 開発版: 3日目（2026-10-25）。護衛と敵運搬者への短い迎撃を追加した版。
     /// Ariadneの部隊全体を指揮するAI。4人へ探索・回収・帰還の仕事を割り当てる。
     /// 判断材料は公開SXG APIで取得した観測情報だけで、未観測の迷路は参照しない。
     /// </summary>
@@ -17,6 +17,8 @@ namespace Party1111111
         // Dictionaryの列挙中には削除せず、列挙が終わってからまとめて削除する。
         private readonly List<int> expired = new List<int>(), reserved = new List<int>();
         private AriadneMap graph;
+        // 自部隊の公開観測を個人AIへ伝える連絡帳。部隊終了時に登録を解除する。
+        private readonly AriadneTactics tactics = new AriadneTactics();
         private PartyMemberInfo[] members;
 
         // [メンバー番号][セル番号]。距離の単位はマス、firstStepsは最初に進む隣接セル。
@@ -26,6 +28,10 @@ namespace Party1111111
         // goalsは前回の担当目標。assignedは今回の思考で仕事が確定済みかを表す。
         private int[] goals;
         private bool[] assigned;
+
+        // 戦闘支援は同時に1人まで。継続時間と再開待ちの単位はゲーム内秒。
+        private int tacticalMember = -1, tacticalEnemy = -1;
+        private float tacticalUntil, tacticalRestUntil;
 
         // Unityのゲーム内時刻（秒）。一時停止やゲーム速度の変更に追従する。
         private float startedAt, nextThink;
@@ -37,6 +43,8 @@ namespace Party1111111
             internal Vector3 Position;
             internal float Value, SeenAt;
         }
+
+        private void OnDestroy() => tactics.Release();
 
         protected override void SXG_OnPartyThink()
         {
@@ -79,6 +87,8 @@ namespace Party1111111
                 goals[i] = -1;
             }
             RememberTreasures();
+            tactics.Refresh(members, SXG_GetVisibleCharacters(), map);
+            AssignSupport(SXG_GetVisibleCharacters());
 
             // 「誰が・何をするか」の全組合せから、評価の高い組を1件ずつ確定する。
             // 先頭の仲間が遠くの宝を先取りするのを防ぎ、同じセルの担当も重複させない。
@@ -154,6 +164,89 @@ namespace Party1111111
                 if (target >= 0) Move(i, target); else SXG_StopMember(i);
             }
         }
+
+        /// <summary>
+        /// 手の空いた仲間を最大1人だけ、近場の護衛か敵運搬者の迎撃に回す。
+        /// 見失った敵は追わず、既知経路で届く短い仕事だけを引き受ける。
+        /// </summary>
+        private void AssignSupport(IReadOnlyList<VisibleCharacterData> visible)
+        {
+            if (tacticalMember >= 0)
+            {
+                foreach (VisibleCharacterData enemy in visible)
+                {
+                    if (enemy.CharacterId != tacticalEnemy || Time.time >= tacticalUntil
+                        || assigned[tacticalMember] || !CanSupport(tacticalMember, enemy)) continue;
+                    IssueSupport(tacticalMember, enemy);
+                    return;
+                }
+                // 接敵して行動ロックに入った時や、敵を見失った時も通常の回収へ戻す。
+                // 終了後2.4秒は新しい追跡を始めず、敵について往復する時間を抑える。
+                tacticalMember = tacticalEnemy = -1;
+                tacticalRestUntil = Time.time + 2.4f;
+            }
+            if (Time.time < tacticalRestUntil) return;
+
+            int bestMember = -1;
+            VisibleCharacterData bestEnemy = null;
+            float bestScore = float.NegativeInfinity;
+            foreach (VisibleCharacterData enemy in visible)
+            {
+                for (int i = 0; i < members.Length; i++)
+                {
+                    if (assigned[i] || !CanSupport(i, enemy)) continue;
+                    int d = distances[i][graph.Index(enemy.CellPosition)];
+                    bool defense = tactics.ThreatensCarrier(enemy.CharacterId);
+                    bool collectingNearby = false;
+                    foreach (TreasureMemory treasure in treasures.Values)
+                    {
+                        int pickup = distances[i][treasure.Cell];
+                        int back = graph.ExitDistances[treasure.Cell];
+                        // 通常の回収と同じ秒単位の見積もりで、終了までに搬出可能な宝だけを守る。
+                        if (pickup >= 0 && pickup <= 4 && back >= 0
+                            && pickup * 0.72f + back * 1.05f + 3f <= 120f - (Time.time - startedAt))
+                        { collectingNearby = true; break; }
+                    }
+                    // 4マス以内（通常移動で約2.9秒）に回収できる宝がある仲間は、任意の奪取追跡に使わない。
+                    // 追跡の上限2.4秒に近い回収機会を守り、護衛以外の寄り道を抑える。
+                    // 味方の護衛なら候補には残すが、距離2マス相当の負担を評価へ加える。
+                    if (collectingNearby && !defense) continue;
+                    // 護衛20・奪取10は無次元の優先度。候補の3〜4歩の距離差より護衛を重くする。
+                    float score = (defense ? 20f : 10f) - d - (collectingNearby ? 2f : 0f);
+                    if (score > bestScore) { bestScore = score; bestMember = i; bestEnemy = enemy; }
+                }
+            }
+            if (bestMember < 0) return;
+            tacticalMember = bestMember; tacticalEnemy = bestEnemy.CharacterId;
+            // 通常速度3・セル間隔2なら、2.4秒はおおよそ3マス分の移動時間。
+            // この上限で回収役が敵を延々と追い続けるのを防ぐ。
+            tacticalUntil = Time.time + 2.4f;
+            IssueSupport(bestMember, bestEnemy);
+        }
+
+        private bool CanSupport(int member, VisibleCharacterData enemy)
+        {
+            if (tactics.IsFriend(enemy.CharacterId) || enemy.IsKnockedOut) return false;
+            bool defense = tactics.ThreatensCarrier(enemy.CharacterId);
+            if (!defense && !enemy.HasTreasure) return false;
+            int cell = graph.Index(enemy.CellPosition);
+            if (cell < 0 || cell >= graph.Size) return false;
+            int distance = distances[member][cell];
+            // 護衛は3歩、運搬者への迎撃は4歩以内の既知経路だけ。遠征には使わない。
+            return distance >= 0 && distance <= (defense ? 3 : 4);
+        }
+
+        private void IssueSupport(int member, VisibleCharacterData enemy)
+        {
+            assigned[member] = true; goals[member] = -1;
+            int target = graph.Index(enemy.CellPosition);
+            // 同じセル内では、観測した敵の座標へ寄って攻撃開始範囲へ入る。
+            // 別セルでは通常の経路指示を使い、壁越しの直線追跡をしない。
+            if (graph.Index(members[member].CurrentCell) == target)
+                SXG_SetMemberMoveTargetWorld(member, enemy.WorldPosition);
+            else Move(member, target);
+        }
+
 
         /// <summary>
         /// 見えている宝を記憶へ反映し、古い情報を破棄する。

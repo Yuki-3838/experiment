@@ -1,30 +1,34 @@
-# SuperDungeonWars — Ariadne 2日目（2026-10-24）
+# SuperDungeonWars — Ariadne 3日目（2026-10-25）
 
 4人で探索・宝箱回収・搬出を分担する参加者AI。2026年10月23日から26日までの4日間で段階的に改善する。
 
-## 2日目の保存版
+## 日別の保存版
 
-**開発日: 2026年10月24日 / 2日目 / 回収・搬出の優先度を調整した版。**
+**現在の開発版: 3日目（2026年10月25日）。護衛判断と敵運搬者への短い迎撃を追加。**
 
-[2日目のコードと説明をまとめた固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-day2/SuperDungeonWars)をGitタグ `superdungeonwars-ariadne-day2` に残す。3日目以降の開発が進んでも、このリンクから2日目の3本のAIスクリプトと説明を取り出せる。
+| 開発日 | 保存版 | 内容と記録 |
+|---|---|---|
+| 2日目・2026-10-24 | [2日目の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-day2/SuperDungeonWars) | 回収・搬出の優先度調整。[2日目の記録](AIExperiments/Ariadne/DAY2_RESULTS.md) |
+| 3日目・2026-10-25 | [3日目の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-day3/SuperDungeonWars) | 護衛判断・短い迎撃。[3日目の記録](AIExperiments/Ariadne/DAY3_RESULTS.md) |
 
-実装と評価を保存したコミットは `cc2e6db`。詳しい変更内容と32試合の結果は [2日目の開発記録](AIExperiments/Ariadne/DAY2_RESULTS.md) を参照。
+日別のGitタグを固定しているため、開発が進んだ後も各日のコードと説明を取り出せる。
 
 ## 公開するファイル
 
-AI本体のC#スクリプト3本と、この説明書・実測結果の説明だけを保存する。
+AI本体のC#スクリプト4本と、この説明書・実測結果の説明だけを保存する。
 
 | スクリプト | 役割 |
 |---|---|
 | [Party1111111Party.cs](Assets/Participants/Party1111111/Party1111111Party.cs) | 部隊全体の担当割当、探索、宝の記憶、回収と帰還の判断 |
 | [AriadneMap.cs](Assets/Participants/Party1111111/AriadneMap.cs) | 観測済み通路の管理、幅優先探索、搬出口までの距離の計算 |
 | [Party1111111Character.cs](Assets/Participants/Party1111111/Party1111111Character.cs) | 攻撃対象と宝箱取得の判断 |
+| [AriadneTactics.cs](Assets/Participants/Party1111111/AriadneTactics.cs) | 自部隊の観測から、味方運搬者に近い敵を個人AIへ通知する |
 
 各スクリプトに、処理の目的、判断の理由、調整値の単位を日本語でコメントしてある。
 
 ## 導入
 
-Unity **6000.3.24f1** の配布済みSuperDungeonWarsプロジェクトを用意し、3本の `.cs` を `Assets/Participants/Party1111111/` に置く。既存の同名スクリプトがあれば中身を置き換え、Unity側の `.meta` は維持する。
+Unity **6000.3.24f1** の配布済みSuperDungeonWarsプロジェクトを用意し、4本の `.cs` を `Assets/Participants/Party1111111/` に置く。2日目から更新する場合は `AriadneTactics.cs` も追加する。既存の同名スクリプトがあれば中身を置き換え、Unity側の `.meta` は維持する。
 
 配布プロジェクトに既存のParty1111111のPrefabがある場合は、そのPartyとCharacterのコンポーネントで使用できる。別途構成する場合は、次のように設定する。
 
@@ -33,7 +37,7 @@ Unity **6000.3.24f1** の配布済みSuperDungeonWarsプロジェクトを用意
 3. `BattlePartyRegistry` の先頭4件の中へParty用Prefabを登録する。
 4. `Assets/Dungeon/Scenes/MazeExplore.unity` を開いてPlayし、チーム紹介からEnterまたはSpaceで進める。
 
-`AriadneMap` はPartyが内部で生成する補助クラスなので、GameObjectへ取り付ける必要はない。チーム表示名AriadneはローカルのParty用Prefabで設定する。`1111111` は仮の受付番号で、正式提出時には主催者指定の番号に合わせる。
+`AriadneMap` と `AriadneTactics` はPartyが内部で生成する補助クラスなので、GameObjectへ取り付ける必要はない。チーム表示名AriadneはローカルのParty用Prefabで設定する。`1111111` は仮の受付番号で、正式提出時には主催者指定の番号に合わせる。
 
 Prefab、`.meta`、ゲーム設定、評価用Editorコード、対戦生データはローカルのUnityプロジェクトで管理する。
 
@@ -49,7 +53,9 @@ Prefab、`.meta`、ゲーム設定、評価用Editorコード、対戦生デー�
 
 宝箱は見失っても位置を記憶するが、近くへ来ても見えない場合、または最後の観測から45秒経った場合に候補から外す。同じセルまで近づいた宝には、観測したワールド座標への移動を指示して接触を狙う。
 
-個人の攻撃は、攻撃可能な敵の宝箱運搬者だけを対象にする。自分が宝を運んでいる間は搬出を優先する。
+個人の攻撃は、攻撃可能な候補の中で味方運搬者に近づいた敵を優先し、次に敵の宝箱運搬者を狙う。運搬者への脅威は公開観測から3ワールド単位以内・既知の接続2歩以内で判定する。自分が宝を運んでいる間は搬出を優先する。
+
+移動を伴う近場の護衛・迎撃へは手の空いた仲間を最大1人だけ回す。護衛3歩・敵運搬者への迎撃4歩以内で、追跡期限は2.4秒（0.12秒周期で終了を判定）。終了後2.4秒は次の追跡を始めない。4マス以内で回収し時間内に搬出できる宝がある仲間は、任意の追跡より回収を優先する。敵を見失った場合も回収・探索へ戻る。
 
 ## 主な調整値
 
@@ -74,4 +80,6 @@ Prefab、`.meta`、ゲーム設定、評価用Editorコード、対戦生デー�
 
 上辺開始など得点が下がった条件もある。全マップで4位置ずつを評価した結果ではなく、候補選定と再測定も同じ条件を使っている。比較条件と悪化した条件を含む詳細は [2日目の実測結果](AIExperiments/Ariadne/DAY2_RESULTS.md) を参照。
 
-3日目は敵運搬者の妨害と味方運搬者の保護、4日目は開始位置と複数マップでの評価・調整を進める。
+3日目は護衛判断と短い迎撃を比較した。初回の計6マップ・12開始条件で、2日目版の平均511.5点・1位6回に対し、採用版は533.5点・1位7回。得点が下がった条件は5条件あり、運搬中のKOも合計24→27回と増えている。護衛の安定した改善は確認できていない。候補比較・追加評価・再実行の計48試合で実行エラー0件。候補選定用8条件と追加評価用4条件を分けた詳細は [3日目の実測結果](AIExperiments/Ariadne/DAY3_RESULTS.md) を参照。
+
+4日目は開始位置と複数マップでの評価・調整・提出準備を進める。
