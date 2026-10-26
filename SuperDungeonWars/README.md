@@ -13,9 +13,20 @@
 
 日別のGitタグを固定しているため、開発が進んだ後も各日のコードと説明を取り出せる。
 
+## ゲーム本体のリザルト早送り実験
+
+[ResultFastForward.patch](ResultFastForward.patch) は、配布プロジェクトの試合終了画面とリザルト演出を自動で5倍速にする実験パッチ。早送りのキー入力は不要で、該当画面中だけ有効になる。
+
+適用するときは配布元リポジトリのルートで確認してから適用する。
+
+```powershell
+git apply --check /path/to/ResultFastForward.patch
+git apply /path/to/ResultFastForward.patch
+```
+
 ## 公開するファイル
 
-AI本体のC#スクリプト4本と、この説明書・実測結果の説明だけを保存する。
+参加者AI関連では、AI本体のC#スクリプト4本と、この説明書・実測結果の説明を保存する。
 
 | スクリプト | 役割 |
 |---|---|

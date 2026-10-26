@@ -1,0 +1,402 @@
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs
+new file mode 100644
+index 0000000..4dce4fe
+--- /dev/null
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs
+@@ -0,0 +1,48 @@
++using System.Collections;
++using UnityEngine;
++
++/// <summary>
++/// リザルト演出で使用する、早送り可能な実時間を提供する。
++/// </summary>
++public static class BattlePresentationTime
++{
++    private static float s_multiplier = 1.0f;
++
++    public static float DeltaTime
++    {
++        get { return Time.unscaledDeltaTime * s_multiplier; }
++    }
++
++    public static void SetMultiplier(float multiplier)
++    {
++        s_multiplier = Mathf.Max(1.0f, multiplier);
++    }
++
++    public static void ResetMultiplier()
++    {
++        s_multiplier = 1.0f;
++    }
++
++    public static IEnumerator WaitForSeconds(float seconds)
++    {
++        if (seconds <= 0.0f)
++        {
++            yield break;
++        }
++
++        float elapsedTime = 0.0f;
++
++        while (elapsedTime < seconds)
++        {
++            elapsedTime += DeltaTime;
++            yield return null;
++        }
++    }
++
++    [RuntimeInitializeOnLoadMethod(
++        RuntimeInitializeLoadType.SubsystemRegistration)]
++    private static void ResetOnSubsystemRegistration()
++    {
++        ResetMultiplier();
++    }
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs.meta b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs.meta
+new file mode 100644
+index 0000000..4d83fd6
+--- /dev/null
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 6a72d64bd93240ea96a4938b8e66c933
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs
+new file mode 100644
+index 0000000..e9ea416
+--- /dev/null
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs
+@@ -0,0 +1,57 @@
++using UnityEngine;
++
++/// <summary>
++/// 試合終了画面とリザルト演出を自動で早送りする。
++/// BattlePrototypeGameController と同じ GameObject に取り付ける。
++/// </summary>
++public sealed class BattleResultFastForwardController : MonoBehaviour
++{
++    [SerializeField]
++    private BattlePrototypeSceneFlowController m_sceneFlowController;
++
++    [SerializeField]
++    [Min(1.0f)]
++    private float m_fastForwardMultiplier = 5.0f;
++
++    private void Awake()
++    {
++        if (m_sceneFlowController == null)
++        {
++            m_sceneFlowController =
++                GetComponent<BattlePrototypeSceneFlowController>();
++        }
++    }
++
++    private void Update()
++    {
++        if (!IsBattleEndOrResultFlow())
++        {
++            BattlePresentationTime.ResetMultiplier();
++            return;
++        }
++
++        BattlePresentationTime.SetMultiplier(
++            m_fastForwardMultiplier);
++    }
++
++    private bool IsBattleEndOrResultFlow()
++    {
++        if (m_sceneFlowController == null)
++        {
++            return false;
++        }
++
++        BattlePrototypeSceneFlowController.SceneFlow sceneFlow =
++            m_sceneFlowController.CurrentSceneFlow;
++
++        return sceneFlow
++                   == BattlePrototypeSceneFlowController.SceneFlow.BattleEndWait
++            || sceneFlow
++                   == BattlePrototypeSceneFlowController.SceneFlow.Result;
++    }
++
++    private void OnDisable()
++    {
++        BattlePresentationTime.ResetMultiplier();
++    }
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs.meta b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs.meta
+new file mode 100644
+index 0000000..4a83ca6
+--- /dev/null
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 3bb54b0f79ae4d20b48bfcc8ed3cd508
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleEndPresentation.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleEndPresentation.cs
+index aaf05b1..8f519d9 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleEndPresentation.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleEndPresentation.cs
+@@ -248,7 +248,7 @@ public sealed class BattleEndPresentation : MonoBehaviour
+ 
+         while (elapsedTime < duration)
+         {
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += BattlePresentationTime.DeltaTime;
+ 
+             float t = Mathf.Clamp01(
+                 elapsedTime / duration);
+@@ -284,7 +284,7 @@ public sealed class BattleEndPresentation : MonoBehaviour
+ 
+         while (elapsedTime < duration)
+         {
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += BattlePresentationTime.DeltaTime;
+ 
+             float t = Mathf.Clamp01(
+                 elapsedTime / duration);
+@@ -327,4 +327,4 @@ public sealed class BattleEndPresentation : MonoBehaviour
+         m_isProceedRequested = null;
+         m_proceedRequestedCallback = null;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultLightEffectRotation.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultLightEffectRotation.cs
+index ab447cb..527b090 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultLightEffectRotation.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultLightEffectRotation.cs
+@@ -18,7 +18,7 @@ public sealed class BattleResultLightEffectRotation : MonoBehaviour
+             0.0f,
+             0.0f,
+             m_rotationSpeed
+-            * Time.unscaledDeltaTime,
++            * BattlePresentationTime.DeltaTime,
+             Space.Self);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultPresentation.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultPresentation.cs
+index 7bda2fc..b906b48 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultPresentation.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultPresentation.cs
+@@ -198,7 +198,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+         if (m_resultStartDelay > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_resultStartDelay);
+         }
+ 
+@@ -238,7 +238,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+         if (m_resultFinishHoldDuration > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_resultFinishHoldDuration);
+         }
+ 
+@@ -329,7 +329,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+             if (isCentralChest
+                 && m_centralChestPreOpenDelay > 0.0f)
+             {
+-                yield return new WaitForSecondsRealtime(
++                yield return BattlePresentationTime.WaitForSeconds(
+                     m_centralChestPreOpenDelay);
+             }
+ 
+@@ -346,7 +346,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+             if (m_treasureOpenRevealDelay > 0.0f)
+             {
+-                yield return new WaitForSecondsRealtime(
++                yield return BattlePresentationTime.WaitForSeconds(
+                     m_treasureOpenRevealDelay);
+             }
+ 
+@@ -408,7 +408,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+             if (m_treasureRevealInterval > 0.0f)
+             {
+-                yield return new WaitForSecondsRealtime(
++                yield return BattlePresentationTime.WaitForSeconds(
+                     m_treasureRevealInterval);
+             }
+ 
+@@ -433,7 +433,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+         while (elapsedTime < m_totalCoinCountUpDuration)
+         {
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += BattlePresentationTime.DeltaTime;
+ 
+             float progress =
+                 Mathf.Clamp01(
+@@ -496,7 +496,7 @@ public sealed class BattleResultPresentation : MonoBehaviour
+ 
+         if (m_treasureRevealInterval > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_treasureRevealInterval);
+         }
+     }
+@@ -1024,4 +1024,4 @@ public sealed class BattleResultPresentation : MonoBehaviour
+         }
+     }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultTeamLane.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultTeamLane.cs
+index bcf2994..a17e577 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultTeamLane.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleResultTeamLane.cs
+@@ -354,7 +354,7 @@ public sealed class BattleResultTeamLane : MonoBehaviour
+ 
+             if (m_addedCoinPopupHoldDuration > 0.0f)
+             {
+-                yield return new WaitForSecondsRealtime(
++                yield return BattlePresentationTime.WaitForSeconds(
+                     m_addedCoinPopupHoldDuration);
+             }
+ 
+@@ -429,7 +429,7 @@ public sealed class BattleResultTeamLane : MonoBehaviour
+ 
+         while (elapsedTime < m_addedCoinPopupPopDuration)
+         {
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += BattlePresentationTime.DeltaTime;
+ 
+             float progress =
+                 Mathf.Clamp01(
+@@ -468,7 +468,7 @@ public sealed class BattleResultTeamLane : MonoBehaviour
+ 
+         if (m_addedCoinPopupHoldDuration > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_addedCoinPopupHoldDuration);
+         }
+ 
+@@ -477,7 +477,7 @@ public sealed class BattleResultTeamLane : MonoBehaviour
+         while (elapsedTime
+                < m_addedCoinPopupFadeOutDuration)
+         {
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += BattlePresentationTime.DeltaTime;
+ 
+             float progress =
+                 Mathf.Clamp01(
+@@ -556,4 +556,4 @@ public sealed class BattleResultTeamLane : MonoBehaviour
+             isVisible);
+     }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleTeamPreviewController.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleTeamPreviewController.cs
+index 1b23b3b..0c29f9a 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleTeamPreviewController.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/Result/BattleTeamPreviewController.cs
+@@ -857,7 +857,7 @@ public sealed class BattleTeamPreviewController : MonoBehaviour
+ 
+         if (displayDuration > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 displayDuration);
+         }
+ 
+@@ -884,7 +884,7 @@ public sealed class BattleTeamPreviewController : MonoBehaviour
+ 
+         if (m_resultTreasureGoldCoinFountainDestroyDelay > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_resultTreasureGoldCoinFountainDestroyDelay);
+         }
+ 
+@@ -2579,4 +2579,4 @@ public sealed class BattleTeamPreviewController : MonoBehaviour
+     }
+     #endregion
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/SceneTransition/MazeThemeTransitionController.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/SceneTransition/MazeThemeTransitionController.cs
+index e8d4b35..3a7f65c 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/SceneTransition/MazeThemeTransitionController.cs
++++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Presentation/SceneTransition/MazeThemeTransitionController.cs
+@@ -329,9 +329,10 @@ public sealed class MazeThemeTransitionController : MonoBehaviour
+ 
+         while (elapsedTime < m_transitionDuration)
+         {
+-            float unscaled = Time.unscaledDeltaTime;
++            float presentationDeltaTime =
++                BattlePresentationTime.DeltaTime;
+ 
+-            elapsedTime += Time.unscaledDeltaTime;
++            elapsedTime += presentationDeltaTime;
+ 
+             float progress = Mathf.Clamp01(
+                 elapsedTime / m_transitionDuration);
+@@ -341,7 +342,7 @@ public sealed class MazeThemeTransitionController : MonoBehaviour
+ 
+             ApplyCellsUntil(targetCellCount, isFadeOut);
+ 
+-            //Debug.Log("[Transition] unscaledTime=" + unscaled
++            //Debug.Log("[Transition] presentationDeltaTime=" + presentationDeltaTime
+             //    + ", elapsedTime=" + elapsedTime
+             //    + ", progress=" + progress
+             //    + ", targetCellCount=" + targetCellCount
+@@ -355,7 +356,7 @@ public sealed class MazeThemeTransitionController : MonoBehaviour
+         // 通常画面を完全に隠した後、覆われた状態を維持する。
+         if (isFadeOut && m_fadeOutHoldDuration > 0.0f)
+         {
+-            yield return new WaitForSecondsRealtime(
++            yield return BattlePresentationTime.WaitForSeconds(
+                 m_fadeOutHoldDuration);
+         }
+ 
+@@ -622,4 +623,4 @@ public sealed class MazeThemeTransitionController : MonoBehaviour
+         m_appliedCellCount = targetCellCount;
+     }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity b/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
+index 918f923..ce8121d 100644
+--- a/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
++++ b/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
+@@ -5487,6 +5487,7 @@ GameObject:
+   - component: {fileID: 1333746972}
+   - component: {fileID: 1333746973}
+   - component: {fileID: 1333746974}
++  - component: {fileID: 1333746975}
+   m_Layer: 0
+   m_Name: BattlePrototypeGameController
+   m_TagString: Untagged
+@@ -5624,6 +5625,20 @@ MonoBehaviour:
+   m_battleTeamIntroductionPresentation: {fileID: 410083216}
+   m_battleStartCountdownPresentation: {fileID: 2047276625}
+   m_battleEndPresentation: {fileID: 1345516980}
++--- !u!114 &1333746975
++MonoBehaviour:
++  m_ObjectHideFlags: 0
++  m_CorrespondingSourceObject: {fileID: 0}
++  m_PrefabInstance: {fileID: 0}
++  m_PrefabAsset: {fileID: 0}
++  m_GameObject: {fileID: 1333746968}
++  m_Enabled: 1
++  m_EditorHideFlags: 0
++  m_Script: {fileID: 11500000, guid: 3bb54b0f79ae4d20b48bfcc8ed3cd508, type: 3}
++  m_Name:
++  m_EditorClassIdentifier: Assembly-CSharp::BattleResultFastForwardController
++  m_sceneFlowController: {fileID: 1333746974}
++  m_fastForwardMultiplier: 5
+ --- !u!1 &1345516978
+ GameObject:
+   m_ObjectHideFlags: 0
