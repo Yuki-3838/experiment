@@ -30,11 +30,11 @@
 
 各スクリプトに、処理の目的、判断の理由、調整値の単位を日本語でコメントしてある。
 
-## リザルト宝箱の開封を速くする補助スクリプト
+## デバッグ用補助スクリプト
 
-ユーザーの追加依頼で、[ResultFastForward](Tools/ResultFastForward/README.md) に汎用の単体スクリプト1本と導入説明を保存した。`BattleResultFastForwardController.cs` を結果画面のルートGameObjectへアタッチする。UnityとC#標準機能のみを使い、ゲーム固有の型・固定フィールド名の一覧・Inspectorの参照設定は不要。一般的な命名の時間設定を短縮する。既に同名スクリプトがある場合は置き換える。
+[GameSpeed](Tools/GameSpeed/README.md) にゲーム全体をPause・0.25x・0.5x・1x・2x・5x・10xで操作する単体スクリプトを保存した。常時有効なGameObjectへ `GameSpeedDebugController.cs` を1つ付けるだけで動き、Inspectorの参照設定は不要。
 
-これは結果画面用の補助で、参加者AIの提出フォルダーには含めない。Unityでのコンパイル・再生確認は未実施。
+[ResultFastForward](Tools/ResultFastForward/README.md) は結果画面専用。ゲーム速度とは別に開封演出の時間設定を短縮し、必要なら順次開封を省略して結果をすぐ表示できる。結果画面のルートGameObjectへ `BattleResultFastForwardController.cs` を付ける。どちらも参加者AIの提出フォルダーには含めない。Unityでのコンパイル・再生確認は未実施。
 
 ## 導入
 

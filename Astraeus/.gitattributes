@@ -1,4 +1,0 @@
-# Preserve source/prefab bytes across checkout so hashes match on every OS.
-Astraeus.cs -text
-Astraeus.prefab -text
-stability-fixes.patch -text

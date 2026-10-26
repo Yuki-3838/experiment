@@ -15,6 +15,9 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
     [Min(1.0f)]
     private float m_fastForwardMultiplier = 5.0f;
 
+    [SerializeField]
+    private bool m_revealResultsImmediately;
+
     // 単位は倍率適用前の秒。長い溜め演出も待ち続けないよう、共通上限0.35秒を設ける。
     private const float MaximumSecondsBeforeMultiplier = 0.35f;
 
@@ -37,14 +40,20 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
         // 既存のInspector保存値も利用する。倍率1は短縮なし、変更は次回有効化時に反映する。
         m_activeMultiplier = float.IsNaN(m_fastForwardMultiplier) || float.IsInfinity(m_fastForwardMultiplier)
             ? 1.0f : Mathf.Max(1.0f, m_fastForwardMultiplier);
-        if (m_activeMultiplier > 1.0f) ConfigureTargets();
+        if (ShouldConfigureTargets()) ConfigureTargets();
     }
 
     private void LateUpdate()
     {
         // 表示後に生成される金額ポップアップなども自動で拾う。
         // 既存の対象は再計算せず、毎フレーム割り算して縮み続けることを防ぐ。
-        if (m_activeMultiplier > 1.0f) ConfigureTargets();
+        if (ShouldConfigureTargets()) ConfigureTargets();
+    }
+
+    private bool ShouldConfigureTargets()
+    {
+        return m_activeMultiplier > 1.0f
+            || m_revealResultsImmediately;
     }
 
     private void ConfigureTargets()
@@ -59,7 +68,9 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
                 float original = (float)field.GetValue(target);
                 // 無効値や負値は「無効」の指定かもしれないため、そのまま維持する。
                 if (float.IsNaN(original) || float.IsInfinity(original) || original <= 0.0f) continue;
-                float applied = Mathf.Min(original, MaximumSecondsBeforeMultiplier) / m_activeMultiplier;
+                float applied = m_revealResultsImmediately
+                    ? 0.0f
+                    : Mathf.Min(original, MaximumSecondsBeforeMultiplier) / m_activeMultiplier;
                 if (original == applied) continue;
                 m_backups.Add(new FieldBackup { Target = target, Field = field, Original = original, Applied = applied });
                 field.SetValue(target, applied);
