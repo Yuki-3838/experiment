@@ -32,7 +32,7 @@
 
 ## デバッグ用補助スクリプト
 
-[GameSpeed](Tools/GameSpeed/README.md) にゲーム全体をPause・0.25x・0.5x・1x・2x・5x・10xで操作する単体スクリプトを保存した。常時有効なGameObjectへ `GameSpeedDebugController.cs` を1つ付けるだけで動き、Inspectorの参照設定は不要。
+[GameSpeed](Tools/GameSpeed/README.md) にゲーム全体をPause・0.25x・0.5x・1x・2x・5x・10xで操作するデバッグツールを保存した。GameObjectへ `GameSpeedDebugController` を付け、Play中にHierarchyから選ぶとInspectorに速度ボタンが出る。
 
 [ResultFastForward](Tools/ResultFastForward/README.md) は結果画面専用。ゲーム速度とは別に開封演出の時間設定を短縮し、必要なら順次開封を省略して結果をすぐ表示できる。結果画面のルートGameObjectへ `BattleResultFastForwardController.cs` を付ける。どちらも参加者AIの提出フォルダーには含めない。Unityでのコンパイル・再生確認は未実施。
 

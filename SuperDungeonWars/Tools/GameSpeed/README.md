@@ -1,21 +1,20 @@
 # ゲーム速度デバッグ
 
-`GameSpeedDebugController.cs` は、ゲーム全体を一時停止・減速・加速する単体コンポーネントです。Unity標準機能だけで動き、他のコンポーネントへの参照設定や追加パッケージを必要としません。
+`GameSpeedDebugController` を付けたGameObjectをPlay中に選択すると、InspectorからPause・0.25x・0.5x・1x・2x・5x・10x・Resetを操作できます。左上などのゲーム画面にはパネルを表示しません。
 
-## 使い方
+## 設置
 
 1. `GameSpeedDebugController.cs` を対象プロジェクトの `Assets/` 以下へコピーします。
-2. Play中に有効なまま残るGameObjectへ `GameSpeedDebugController` を1つ追加します。
-3. 画面左上のボタンで速度を選びます。`Reset` はアタッチ時点の速度へ戻します。
+2. `Editor/GameSpeedDebugControllerEditor.cs` も `Assets/` 以下の `Editor/` フォルダへコピーします。例: `Assets/DebugTools/GameSpeed/Editor/`
+3. シーン内の有効なGameObjectに `GameSpeedDebugController` を1つ追加します。
+4. Playを開始し、HierarchyでそのGameObjectを選ぶとInspectorに速度ボタンが表示されます。
 
-ボタンは Pause、0.25x、0.5x、1x、2x、5x、10x です。パネルはドラッグして移動できます。Pause中も画面上の操作は使えます。コンポーネントを無効化するかGameObjectを破棄すると、アタッチ前の速度へ戻ります。
+GameObjectへアタッチするコンポーネントは1つです。EditorスクリプトはInspectorのボタン表示用で、ビルドには含まれません。
+
+`Reset` はコンポーネントが有効になった時点の速度へ戻します。コンポーネントを無効化するかGameObjectを破棄した場合も同じ速度へ戻します。
 
 ## 対象範囲
 
-このコンポーネントは `Time.timeScale` を変更します。そのため、Unityのスケール時間を使う `Time.deltaTime`、`WaitForSeconds`、通常モードのAnimatorやParticle Systemなどが速度変更の対象です。物理演算もスケールしますが、高速時には更新負荷やシミュレーション精度が変わります。
+このツールは `Time.timeScale` を変更します。`Time.deltaTime`、`WaitForSeconds`、通常モードのAnimatorやParticle System、物理演算など、スケール時間を使う処理が対象です。高速時はシミュレーション負荷や精度が変わることがあります。
 
-`Time.unscaledDeltaTime`、`Time.unscaledTime`、`WaitForSecondsRealtime` を使う別処理は対象外です。結果画面のように独自の待ち時間を使う演出には、[結果演出用の補助スクリプト](../ResultFastForward/README.md)を使うか、その演出をスケール時間へ接続してください。ゲーム速度と結果演出の短縮は別々に操作できます。
-
-## 制限
-
-画面パネルはGameObjectが有効なシーンで表示されます。シーン遷移後も使う場合は、遷移後も有効なGameObjectへ取り付けてください。ゲーム固有の型や結果画面の情報を読み取る処理はありません。
+`Time.unscaledDeltaTime`、`Time.unscaledTime`、`WaitForSecondsRealtime` や独自タイマーを使う処理は対象外です。結果画面のように独自の待ち時間を使う演出には、[結果演出用の補助スクリプト](../ResultFastForward/README.md)を使うか、その待ち時間をスケール時間へ接続してください。
