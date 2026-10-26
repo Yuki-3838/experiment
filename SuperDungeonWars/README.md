@@ -32,7 +32,7 @@
 
 ## リザルト宝箱の開封を速くする補助スクリプト
 
-ユーザーの追加依頼で、[ResultFastForward](Tools/ResultFastForward/README.md) にスクリプト1本と導入説明を保存した。`BattleResultFastForwardController.cs` を、`BattleResultPresentation` が付いた同じGameObjectへアタッチして使用する。Inspectorの参照設定は不要。既に同名スクリプトがある場合は置き換える。
+ユーザーの追加依頼で、[ResultFastForward](Tools/ResultFastForward/README.md) に汎用の単体スクリプト1本と導入説明を保存した。`BattleResultFastForwardController.cs` を結果画面のルートGameObjectへアタッチする。UnityとC#標準機能のみを使い、ゲーム固有の型・固定フィールド名の一覧・Inspectorの参照設定は不要。一般的な命名の時間設定を短縮する。既に同名スクリプトがある場合は置き換える。
 
 これは結果画面用の補助で、参加者AIの提出フォルダーには含めない。Unityでのコンパイル・再生確認は未実施。
 
