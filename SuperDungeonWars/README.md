@@ -17,7 +17,7 @@
 
 [ResultFastForward.patch](ResultFastForward.patch) は、配布プロジェクトの試合終了画面とリザルト演出を自動で5倍速にする実験パッチ。早送りのキー入力は不要で、該当画面中だけ有効になる。
 
-取り付けるコンポーネントは [BattleResultFastForwardController.cs](Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs)。時間制御の補助スクリプト [BattlePresentationTime.cs](Assets/Dungeon/Program/Game/Debug/BattlePresentationTime.cs) と各metaファイルも保存している。パッチを適用するとMazeExploreシーンのGameObject「BattleResultPresentation」に自動で追加される。手動で設定する場合も、このGameObjectに `BattleResultFastForwardController` を追加する。`BattleResultPresentation` は同じGameObjectから取得するため、Inspectorで参照を割り当てる必要はない。`BattlePresentationTime` はstatic補助クラスなのでGameObjectには追加しない。
+取り付けるスクリプトは [BattleResultFastForwardController.cs](Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs) だけ。パッチを適用するとMazeExploreシーンのGameObject「BattleResultPresentation」に自動で追加される。手動で設定する場合も、このGameObjectに追加するだけで動き、Inspectorで他のコンポーネントやスクリプトを参照設定する必要はない。結果画面が有効な間だけ時間を5倍速にし、無効になると元の時間へ戻す。
 
 適用するときは配布元リポジトリのルートで確認してから適用する。
 
