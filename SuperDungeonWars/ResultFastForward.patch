@@ -62,37 +62,35 @@ index 0000000..4d83fd6
 +guid: 6a72d64bd93240ea96a4938b8e66c933
 diff --git a/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs
 new file mode 100644
-index 0000000..e9ea416
+index 0000000..2771d68
 --- /dev/null
 +++ b/SuperDungeonWars/Assets/Dungeon/Program/Game/Debug/BattleResultFastForwardController.cs
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,39 @@
 +using UnityEngine;
 +
 +/// <summary>
 +/// 試合終了画面とリザルト演出を自動で早送りする。
-+/// BattlePrototypeGameController と同じ GameObject に取り付ける。
++/// BattleResultPresentation と同じ GameObject に取り付ける。
 +/// </summary>
++[RequireComponent(typeof(BattleResultPresentation))]
 +public sealed class BattleResultFastForwardController : MonoBehaviour
 +{
-+    [SerializeField]
-+    private BattlePrototypeSceneFlowController m_sceneFlowController;
-+
 +    [SerializeField]
 +    [Min(1.0f)]
 +    private float m_fastForwardMultiplier = 5.0f;
 +
++    private BattleResultPresentation m_resultPresentation;
++
 +    private void Awake()
 +    {
-+        if (m_sceneFlowController == null)
-+        {
-+            m_sceneFlowController =
-+                GetComponent<BattlePrototypeSceneFlowController>();
-+        }
++        m_resultPresentation =
++            GetComponent<BattleResultPresentation>();
 +    }
 +
 +    private void Update()
 +    {
-+        if (!IsBattleEndOrResultFlow())
++        if (m_resultPresentation == null
++            || m_resultPresentation.IsResultSequenceCompleted)
 +        {
 +            BattlePresentationTime.ResetMultiplier();
 +            return;
@@ -100,22 +98,6 @@ index 0000000..e9ea416
 +
 +        BattlePresentationTime.SetMultiplier(
 +            m_fastForwardMultiplier);
-+    }
-+
-+    private bool IsBattleEndOrResultFlow()
-+    {
-+        if (m_sceneFlowController == null)
-+        {
-+            return false;
-+        }
-+
-+        BattlePrototypeSceneFlowController.SceneFlow sceneFlow =
-+            m_sceneFlowController.CurrentSceneFlow;
-+
-+        return sceneFlow
-+                   == BattlePrototypeSceneFlowController.SceneFlow.BattleEndWait
-+            || sceneFlow
-+                   == BattlePrototypeSceneFlowController.SceneFlow.Result;
 +    }
 +
 +    private void OnDisable()
@@ -368,35 +350,34 @@ index e8d4b35..3a7f65c 100644
 \ No newline at end of file
 +}
 diff --git a/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity b/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
-index 918f923..ce8121d 100644
+index 918f923..c40ba6d 100644
 --- a/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
 +++ b/SuperDungeonWars/Assets/Dungeon/Scenes/MazeExplore.unity
-@@ -5487,6 +5487,7 @@ GameObject:
-   - component: {fileID: 1333746972}
-   - component: {fileID: 1333746973}
-   - component: {fileID: 1333746974}
-+  - component: {fileID: 1333746975}
-   m_Layer: 0
-   m_Name: BattlePrototypeGameController
+@@ -4075,6 +4075,7 @@ GameObject:
+   m_Component:
+   - component: {fileID: 1037963868}
+   - component: {fileID: 1037963869}
++  - component: {fileID: 1037963870}
+   m_Layer: 5
+   m_Name: BattleResultPresentation
    m_TagString: Untagged
-@@ -5624,6 +5625,20 @@ MonoBehaviour:
-   m_battleTeamIntroductionPresentation: {fileID: 410083216}
-   m_battleStartCountdownPresentation: {fileID: 2047276625}
-   m_battleEndPresentation: {fileID: 1345516980}
-+--- !u!114 &1333746975
+@@ -4127,6 +4128,19 @@ MonoBehaviour:
+   m_treasureOpenRevealDelay: 0.24
+   m_resultFinishHoldDuration: 0.8
+   m_centralChestPreOpenDelay: 2
++--- !u!114 &1037963870
 +MonoBehaviour:
 +  m_ObjectHideFlags: 0
 +  m_CorrespondingSourceObject: {fileID: 0}
 +  m_PrefabInstance: {fileID: 0}
 +  m_PrefabAsset: {fileID: 0}
-+  m_GameObject: {fileID: 1333746968}
++  m_GameObject: {fileID: 1037963867}
 +  m_Enabled: 1
 +  m_EditorHideFlags: 0
 +  m_Script: {fileID: 11500000, guid: 3bb54b0f79ae4d20b48bfcc8ed3cd508, type: 3}
 +  m_Name:
 +  m_EditorClassIdentifier: Assembly-CSharp::BattleResultFastForwardController
-+  m_sceneFlowController: {fileID: 1333746974}
 +  m_fastForwardMultiplier: 5
- --- !u!1 &1345516978
+ --- !u!1 &1042361516
  GameObject:
    m_ObjectHideFlags: 0
