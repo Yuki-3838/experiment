@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化1（2026-10-26）の個人判断。護衛と奪取を優先し、攻撃範囲内の通常敵にも反撃する。
+    /// 追加強化2（2026-10-26）の個人判断。護衛と奪取を優先し、攻撃範囲内の通常敵にも反撃する。
     /// 移動先の決定はParty側に集約し、戦うためだけの追跡はここでは行わない。
     /// </summary>
     public sealed class Party0004838Character : ComCharacterBase
