@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化2（2026-10-26）の護衛用連絡帳。Partyが公開APIで得た観測だけを個人AIへ伝える。
+    /// 追加強化3（2026-10-26）の連絡帳。公開観測による護衛対象と中央担当を個人AIへ伝える。
     /// ゲーム本体や他部隊の実体を保持せず、自部隊のキャラクターIDごとに連絡帳を登録する。
     /// </summary>
     internal sealed class AriadneTactics
@@ -13,12 +13,16 @@ namespace Party0004838
         private readonly HashSet<int> friends = new HashSet<int>(), threats = new HashSet<int>();
         private readonly List<int> registered = new List<int>();
         private float observedAt;
+        private int centralRunnerId = -1;
+        // 自部隊の公開搬出フックでのみ確定する。敵の見えない行動から搬出を推測しない。
+        internal bool CentralExported { get; private set; }
 
         /// <summary>今回の観測から、運搬中の仲間へ接近している敵のIDを更新する。</summary>
         internal void Refresh(PartyMemberInfo[] members, IReadOnlyList<VisibleCharacterData> visible, KnownMapView map)
         {
             Release();
             friends.Clear(); threats.Clear(); observedAt = Time.time;
+            centralRunnerId = -1;
             foreach (PartyMemberInfo member in members)
             {
                 if (member == null) continue;
@@ -43,6 +47,25 @@ namespace Party0004838
 
         internal bool IsFriend(int characterId) => friends.Contains(characterId);
         internal bool ThreatensCarrier(int characterId) => threats.Contains(characterId);
+
+        internal void SetCentralRunner(int characterId)
+        {
+            if (friends.Contains(characterId)) centralRunnerId = characterId;
+        }
+
+        /// <summary>有効な中央担当だけが、道中の通常宝箱を拾わずに進める。</summary>
+        internal static bool IsCentralRunner(int memberId)
+        {
+            if (!Boards.TryGetValue(memberId, out AriadneTactics board)) return false;
+            float age = Time.time - board.observedAt;
+            // 護衛と同じ0.36ゲーム内秒。更新が止まれば通常の取得判断へ戻す。
+            return age >= 0 && age <= 0.36f && board.centralRunnerId == memberId;
+        }
+
+        internal static void NotifyCentralExported(int memberId)
+        {
+            if (Boards.TryGetValue(memberId, out AriadneTactics board)) board.CentralExported = true;
+        }
 
         /// <summary>個人AIが、自分の部隊から届いた新鮮な護衛対象だけを参照する。</summary>
         internal static bool IsDefenseTarget(int memberId, int enemyId)

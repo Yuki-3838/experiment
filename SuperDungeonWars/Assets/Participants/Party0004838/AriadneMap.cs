@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化2（2026-10-26）。公開された既知マップから通常の最短経路と危険を避ける帰還経路を求める。
+    /// 追加強化3（2026-10-26）。既知経路・帰還経路と、公開された中央ホールの確認先を求める。
     /// 未観測セルへは「入口の分かっている次の1マス」としてだけ進める。
     /// 未観測セルを通過して別の場所へ行く経路は作らない。
     /// </summary>
@@ -17,6 +17,8 @@ namespace Party0004838
             { MazeDirection.North, MazeDirection.East, MazeDirection.South, MazeDirection.West };
         private readonly int width, height;
         private readonly bool[] observed;
+        // 中央ホールの範囲は公開IsCentralHallから取得する。訪問記録は自部隊の現在セルだけから作る。
+        private readonly bool[] centralHall, centralVisited;
 
         // openingsの下位4ビットが各方向の開口。queueはBFSで使い回す探索待ち配列。
         private readonly int[] openings, queue, exitFirst;
@@ -27,6 +29,7 @@ namespace Party0004838
         // 観測済みの通路から1歩で入れる未観測セル。探索担当の目標候補になる。
         internal readonly List<int> Frontiers = new List<int>();
         internal int Size => width * height;
+        internal int CenterCell => (height / 2) * width + width / 2;
 
         // 危険を含む経路の作業領域。重みは「通常の1歩」と比較する相対コスト。
         // 二分ヒープを使い、全セル同士の比較や毎思考の配列生成を避ける。
@@ -39,6 +42,7 @@ namespace Party0004838
         {
             this.width = width; this.height = height;
             observed = new bool[Size]; openings = new int[Size]; queue = new int[Size];
+            centralHall = new bool[Size]; centralVisited = new bool[Size];
             ExitDistances = new int[Size]; exitFirst = new int[Size];
             routeCost = new float[Size]; routeFirst = new int[Size]; routeSteps = new int[Size];
             heapCell = new int[Size * 4 + 4]; heapCost = new float[heapCell.Length];
@@ -56,7 +60,44 @@ namespace Party0004838
             Vector2Int ca = Cell(a), cb = Cell(b);
             return Mathf.Abs(ca.x - cb.x) + Mathf.Abs(ca.y - cb.y);
         }
-        internal int DistanceToCenter(int a) => Manhattan(a, (height / 2) * width + width / 2);
+        internal int DistanceToCenter(int a) => Manhattan(a, CenterCell);
+
+        internal void RecordCentralVisit(int cell)
+        {
+            if (cell >= 0 && cell < Size && centralHall[cell]) centralVisited[cell] = true;
+        }
+
+        // 宝が未発見のとき、確認済みの空のホールへ何度も人を戻さないための終了条件。
+        // 未観測セルの中身や敵の搬出を推測した判定ではない。
+        internal bool CentralSearchComplete
+        {
+            get
+            {
+                bool known = false;
+                for (int i = 0; i < Size; i++)
+                {
+                    if (!centralHall[i]) continue;
+                    known = true;
+                    if (!centralVisited[i]) return false;
+                }
+                return known;
+            }
+        }
+
+        /// <summary>既知経路で届く、まだ自部隊が訪れていないホール内のセルを選ぶ。</summary>
+        internal int FindCentralSearchTarget(int[] distances)
+        {
+            int target = -1;
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < Size; i++)
+            {
+                if (!centralHall[i] || centralVisited[i] || distances[i] < 1) continue;
+                // 移動1歩を基本に、中心からの距離1マスへ0.25を加える誘導用の相対コスト。
+                float score = distances[i] + DistanceToCenter(i) * 0.25f;
+                if (score < best) { best = score; target = i; }
+            }
+            return target;
+        }
         /// <summary>新しく見えたセルを取り込み、探索候補と帰還距離を更新する。</summary>
         internal void Refresh(KnownMapView map)
         {
@@ -66,6 +107,7 @@ namespace Party0004838
                 if (observed[i]) continue;
                 if (!map.TryGetCell(Cell(i), out KnownCellInfo info) || !info.IsObserved) continue;
                 observed[i] = true;
+                centralHall[i] = info.IsCentralHall && info.IsWalkable;
                 for (int d = 0; d < 4; d++) if (info.IsOpen(Flags[d])) openings[i] |= 1 << d;
             }
             // 観測済みセルの開口だけを根拠に、隣の未観測セルを列挙する。

@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化2（2026-10-26）の個人判断。護衛と奪取を優先し、攻撃範囲内の通常敵にも反撃する。
+    /// 追加強化3（2026-10-26）の個人判断。反撃と、中央担当だけの宝箱取得の選別を行う。
     /// 移動先の決定はParty側に集約し、戦うためだけの追跡はここでは行わない。
     /// </summary>
     public sealed class Party0004838Character : ComCharacterBase
@@ -40,8 +40,15 @@ namespace Party0004838
             return best;
         }
 
-        // 宝の種類は問わず、手が空いているときだけ接触した宝を拾う。
-        // この段階では中央宝箱を探すために通常宝箱を拒否するような選別はしない。
-        protected override bool SXG_ShouldPickUpTreasure(TreasureType type) => !SXG_HasTreasure;
+        // 中央担当1人は、途中の通常宝箱で運搬を始めて目的を失わないよう選別する。
+        // ほかの仲間と、中央担当を解除された仲間は、従来どおり通常宝箱も拾える。
+        protected override bool SXG_ShouldPickUpTreasure(TreasureType type)
+            => !SXG_HasTreasure && (type == TreasureType.CentralChest || !AriadneTactics.IsCentralRunner(SXG_CharacterId));
+
+        // 自分の搬出という公開イベントを連絡帳へ返し、空になった中央の探索を再開させない。
+        protected override void SXG_OnTreasureExported(TreasureType type)
+        {
+            if (type == TreasureType.CentralChest) AriadneTactics.NotifyCentralExported(SXG_CharacterId);
+        }
     }
 }

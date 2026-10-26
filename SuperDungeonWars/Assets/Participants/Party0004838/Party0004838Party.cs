@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化2（2026-10-26）。近場の回収を探索より先に割り当て、遠征を制限する。効果は未測定。
+    /// 追加強化3（2026-10-26）。中央の金宝箱へ1人を優先し、残りで近場を回収する。効果は未測定。
     /// Ariadneの部隊全体を指揮するAI。4人へ探索・回収・帰還の仕事を割り当てる。
     /// 判断材料は公開SXG APIで取得した観測情報だけで、未観測の迷路は参照しない。
     /// </summary>
@@ -37,6 +37,10 @@ namespace Party0004838
         private int[] pickupIds;
         private bool[] longJobs;
         private enum CollectionKind { Nearby, ShortTrip, LongerTrip }
+        // 中央担当のメンバー番号と、金宝箱が最後に見えたときの運搬状態。
+        // 運搬中と観測した後は、落ちた金宝箱を再観測するまで空の中央へ向かわない。
+        private int centralRunner = -1;
+        private bool centralCarried;
 
         // 戦闘支援は同時に1人まで。継続時間と再開待ちの単位はゲーム内秒。
         private int tacticalMember = -1, tacticalEnemy = -1;
@@ -51,6 +55,7 @@ namespace Party0004838
             internal int Id, Cell;
             internal Vector3 Position;
             internal float Value, SeenAt;
+            internal bool Central;
         }
 
         private void OnDestroy() => tactics.Release();
@@ -85,6 +90,8 @@ namespace Party0004838
             for (int i = 0; i < members.Length; i++)
             {
                 SXG_TryGetMemberInfo(i, out members[i]);
+                if (members[i] != null && !members[i].IsKnockedOut)
+                    graph.RecordCentralVisit(graph.Index(members[i].CurrentCell));
                 // 搬出やKOで手ぶらになったら前回の出口への優遇も終了し、次の運搬へ引き継がない。
                 if (members[i] != null && !members[i].HasTreasure) returnExits[i] = -1;
                 if (members[i] != null && members[i].IsKnockedOut)
@@ -123,7 +130,7 @@ namespace Party0004838
             }
             RememberTreasures();
 
-            // 探索と宝の回収を同じ点数で競わせず、回収できる近場の宝から先に担当を確保する。
+            // 探索と宝の回収を同じ点数で競わせず、中央担当と近場回収を探索より先に確保する。
             // 投げ動作などでロック中の運搬者・回収担当も、すでに働いている人数として数える。
             int collectors = 0;
             for (int i = 0; i < members.Length; i++)
@@ -136,13 +143,16 @@ namespace Party0004838
                     && treasures.TryGetValue(pickupIds[i], out TreasureMemory pendingPickup))
                     reserved.Add(pendingPickup.Cell);
             }
-            // 4歩以内かつ回収・搬出24秒以内の宝は、全員が近くにいる場合も回収を優先する。
+            // 金宝箱は通常の距離・効率比較へ埋もれさせず、手ぶらの中央担当を先に1人確保する。
+            AssignCentralObjective(ref collectors);
+            // 中央担当以外は、4歩以内かつ回収・搬出24秒以内の宝を探索より先に確保する。
             AssignCollections(CollectionKind.Nearby, members.Length, ref collectors);
             // それ以外の短い回収は、通常1人を探索等へ残す。近場回収で全員埋まった場合は上書きしない。
             int collectorLimit = Mathf.Max(1, members.Length - 1);
             AssignCollections(CollectionKind.ShortTrip, collectorLimit, ref collectors);
-            // 長い回収へは最大1人。短い回収の担当が取れなかった余力でだけ引き受ける。
-            if (!HasLongCollection()) AssignCollections(CollectionKind.LongerTrip, collectorLimit, ref collectors);
+            // 中央担当がいる間は通常宝への新しい遠征を出さない。運搬中の仕事は先に確保済み。
+            if (centralRunner < 0 && !HasLongCollection())
+                AssignCollections(CollectionKind.LongerTrip, collectorLimit, ref collectors);
             AssignSupport(visibleCharacters);
 
             // 回収・搬出・支援の担当を確保した後、残った仲間だけへ探索を割り当てる。
@@ -196,6 +206,94 @@ namespace Party0004838
         }
 
         /// <summary>
+        /// 金宝箱が取れる既知経路を優先し、未接続なら1人だけ中央へ向けて開拓する。
+        /// 運搬者の仕事を奪わず、ほかの仲間による近場回収を継続する。
+        /// </summary>
+        private void AssignCentralObjective(ref int collectors)
+        {
+            int previous = centralRunner;
+            centralRunner = -1;
+            if (tactics.CentralExported || centralCarried) return;
+            TreasureMemory gold = null;
+            foreach (TreasureMemory treasure in treasures.Values)
+                if (treasure.Central) { gold = treasure; break; }
+
+            // ロック中でも、すでに金宝箱へ向かっていた担当を重ねて派遣しない。
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (members[i] == null || members[i].IsKnockedOut || members[i].HasTreasure || !assigned[i]) continue;
+                if (gold != null && pickupIds[i] == gold.Id)
+                { SetCentralRunner(i); return; }
+            }
+
+            int runner = -1;
+            float best = float.PositiveInfinity;
+            bool knownTrip = false;
+            if (gold != null)
+            {
+                if (gold.Cell < 0 || gold.Cell >= graph.Size || reserved.Contains(gold.Cell)) return;
+                for (int i = 0; i < members.Length; i++)
+                {
+                    if (assigned[i]) continue;
+                    if (distances[i][gold.Cell] >= 0 && graph.ExitDistances[gold.Cell] >= 0) knownTrip = true;
+                    if (!TryCollectionTime(i, gold, out _, out float seconds)) continue;
+                    // 前回の担当を15%優遇。比較用の秒数だけを割り引き、残り時間の判定は実見積もりで行う。
+                    float score = seconds * (i == previous ? 0.85f : 1f);
+                    if (score < best) { best = score; runner = i; }
+                }
+                if (runner >= 0)
+                {
+                    // 金宝箱は通常宝の24秒・45秒制限の例外。ただし制限時間内の搬出見積もりは必須。
+                    pickupIds[runner] = gold.Id; longJobs[runner] = true;
+                    goals[runner] = gold.Cell; assigned[runner] = true;
+                    reserved.Add(gold.Cell); collectors++;
+                    SetCentralRunner(runner); Move(runner, gold.Cell);
+                    return;
+                }
+                // 経路が分かっていて搬出に間に合わない場合、探索扱いで無理に出発させない。
+                if (knownTrip) return;
+            }
+
+            // 未知の経路を探す段階は残り30秒まで。帰還距離が不明な終盤の遠征を抑える。
+            // ホールを全て訪問済みでも、別の場所に落ちた金宝箱を観測した場合はその位置を目指せる。
+            if (120f - (Time.time - startedAt) <= 30f || (gold == null && graph.CentralSearchComplete)) return;
+            int focus = gold != null ? gold.Cell : graph.CenterCell;
+            int target = -1;
+            best = float.PositiveInfinity;
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (assigned[i]) continue;
+                int hallTarget = gold == null ? graph.FindCentralSearchTarget(distances[i]) : -1;
+                // ホールへ接続済みなら内部の未訪問セルを確認し、金宝箱の観測を狙う。
+                if (hallTarget >= 0 && !reserved.Contains(hallTarget))
+                {
+                    float score = distances[i][hallTarget] * (i == previous ? 0.85f : 1f);
+                    if (score < best) { best = score; runner = i; target = hallTarget; }
+                    continue;
+                }
+                foreach (int frontier in graph.Frontiers)
+                {
+                    int steps = distances[i][frontier];
+                    if (steps < 1 || reserved.Contains(frontier)) continue;
+                    // 既知経路1歩に0.65、中心または観測した宝への座標差1マスに1の相対コスト。
+                    // 座標差は方向付けだけに使い、壁や未知通路を通れるとは仮定しない。
+                    float score = (steps * 0.65f + graph.Manhattan(frontier, focus)) * (i == previous ? 0.85f : 1f);
+                    if (score < best) { best = score; runner = i; target = frontier; }
+                }
+            }
+            if (target < 0) return;
+            pickupIds[runner] = -1; longJobs[runner] = false;
+            goals[runner] = target; assigned[runner] = true; reserved.Add(target);
+            SetCentralRunner(runner); Move(runner, target);
+        }
+
+        private void SetCentralRunner(int member)
+        {
+            centralRunner = member;
+            tactics.SetCentralRunner(members[member].CharacterId);
+        }
+
+        /// <summary>
         /// 近場、短い一往復、長い一往復を別々に割り当てる。
         /// 近場は到着の早さを優先し、それ以外は相対価値/回収から搬出までの秒数で比較する。
         /// </summary>
@@ -213,7 +311,7 @@ namespace Party0004838
                     {
                         if (assigned[i] || !TryCollectionTime(i, treasure, out int pickupDistance, out float seconds)) continue;
                         // 通常移動12歩（概算8.64秒）・全工程24秒以内を短い仕事とする。
-                        // 金の宝でも、この条件を超えれば同時1人の遠征として扱う。
+                        // 金宝箱の専任担当を先に確保し、ここでは残った回収候補を扱う。
                         bool shortTrip = pickupDistance <= 12 && seconds <= 24f;
                         if (kind == CollectionKind.Nearby && (pickupDistance > 4 || !shortTrip)) continue;
                         if (kind == CollectionKind.ShortTrip && !shortTrip) continue;
@@ -391,6 +489,7 @@ namespace Party0004838
             for (int i = 0; i < visible.Count; i++)
             {
                 VisibleTreasureData t = visible[i];
+                if (t.TreasureType == TreasureType.CentralChest) centralCarried = t.IsCarried;
                 // 所有者にかかわらず、運ばれている宝は落ちている宝の回収候補に含めない。
                 if (t.IsCarried) { treasures.Remove(t.TreasureId); continue; }
 
@@ -399,7 +498,8 @@ namespace Party0004838
                 treasures[t.TreasureId] = new TreasureMemory
                 {
                     Id = t.TreasureId, Cell = graph.Index(t.CellPosition), Position = t.WorldPosition,
-                    Value = t.TreasureType == TreasureType.CentralChest ? 2.7f : 1f, SeenAt = Time.time
+                    Value = t.TreasureType == TreasureType.CentralChest ? 2.7f : 1f, SeenAt = Time.time,
+                    Central = t.TreasureType == TreasureType.CentralChest
                 };
             }
         }
