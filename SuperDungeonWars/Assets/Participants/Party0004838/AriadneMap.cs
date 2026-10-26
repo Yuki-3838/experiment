@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 4日目（2026-10-26）の最終版。公開された既知マップを、最短経路を調べやすい配列へ写したもの。
+    /// 追加強化1（2026-10-26）。公開された既知マップから通常の最短経路と危険を避ける帰還経路を求める。
     /// 未観測セルへは「入口の分かっている次の1マス」としてだけ進める。
     /// 未観測セルを通過して別の場所へ行く経路は作らない。
     /// </summary>
@@ -28,11 +28,22 @@ namespace Party0004838
         internal readonly List<int> Frontiers = new List<int>();
         internal int Size => width * height;
 
+        // 危険を含む経路の作業領域。重みは「通常の1歩」と比較する相対コスト。
+        // 二分ヒープを使い、全セル同士の比較や毎思考の配列生成を避ける。
+        private readonly float[] routeCost, heapCost;
+        private readonly int[] routeFirst, routeSteps, heapCell, dangerMark, dangerDepth;
+        private int heapCount, dangerGeneration;
+
+
         internal AriadneMap(int width, int height)
         {
             this.width = width; this.height = height;
             observed = new bool[Size]; openings = new int[Size]; queue = new int[Size];
             ExitDistances = new int[Size]; exitFirst = new int[Size];
+            routeCost = new float[Size]; routeFirst = new int[Size]; routeSteps = new int[Size];
+            heapCell = new int[Size * 4 + 4]; heapCost = new float[heapCell.Length];
+            dangerMark = new int[Size]; dangerDepth = new int[Size];
+
         }
         // 2次元のセル座標と1次元の配列添字を相互に変換する。
         internal int Index(Vector2Int cell) => cell.y * width + cell.x;
@@ -134,6 +145,121 @@ namespace Party0004838
             Vector2Int p = Cell(cell) + Directions[direction];
             return p.x >= 0 && p.x < width && p.y >= 0 && p.y < height ? Index(p) : -1;
         }
+
+        /// <summary>
+        /// 見えている攻撃可能な敵から、既知通路で2歩以内へ危険を加える。
+        /// 同じ敵から同じセルへは一度だけ加算し、壁を越えて危険を広げない。
+        /// </summary>
+        internal void AddObservedDanger(float[] danger, int enemyCell)
+        {
+            if (enemyCell < 0 || enemyCell >= Size || !observed[enemyCell]) return;
+            if (++dangerGeneration == int.MaxValue)
+            {
+                System.Array.Clear(dangerMark, 0, dangerMark.Length);
+                dangerGeneration = 1;
+            }
+            int head = 0, tail = 1;
+            queue[0] = enemyCell; dangerMark[enemyCell] = dangerGeneration; dangerDepth[enemyCell] = 0;
+            while (head < tail)
+            {
+                int current = queue[head++], depth = dangerDepth[current];
+                // 同じセル6・隣接3・2歩先1は、接敵を避けるための追加マス相当コスト。
+                // 隠れた敵や攻撃のクールダウンは推測せず、観測済みの近傍だけを使う。
+                danger[current] += depth == 0 ? 6f : depth == 1 ? 3f : 1f;
+                if (depth == 2) continue;
+                for (int d = 0; d < 4; d++)
+                {
+                    int next = KnownNeighbor(current, d);
+                    if (next < 0 || dangerMark[next] == dangerGeneration) continue;
+                    dangerMark[next] = dangerGeneration; dangerDepth[next] = depth + 1; queue[tail++] = next;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 運搬者だけに、距離と可視の敵への接近コストを合計した帰還経路を求める。
+        /// 再計画時点の最短帰還より6歩以内で、残り時間内に搬出できる見積もりの経路だけを許す。
+        /// 制約内で候補を得られなければ、呼び出し元が従来の最短帰還へ戻す。
+        /// </summary>
+        internal bool TrySaferReturn(int start, int[] shortest, float[] danger, int previousExit,
+            float secondsLeft, out int nextStep, out int chosenExit)
+        {
+            nextStep = chosenExit = -1;
+            int nearest = ClosestExit(shortest);
+            if (nearest < 0 || start < 0 || start >= Size || !observed[start] || shortest[nearest] == 0) return false;
+            int stepLimit = shortest[nearest] + 6;
+            // 各セルに最小コストの候補を1つ保持する近似探索。
+            // 歩数制約下のあらゆる経路を保持する方式ではなく、候補がなければ最短帰還に戻す。
+            for (int i = 0; i < Size; i++)
+            { routeCost[i] = float.PositiveInfinity; routeFirst[i] = -1; routeSteps[i] = int.MaxValue; }
+            heapCount = 0; routeCost[start] = 0; routeFirst[start] = start; routeSteps[start] = 0;
+            PushRoute(start, 0);
+            while (heapCount > 0)
+            {
+                PopRoute(out int current, out float cost);
+                if (cost != routeCost[current] || routeSteps[current] >= stepLimit) continue;
+                for (int d = 0; d < 4; d++)
+                {
+                    int next = KnownNeighbor(current, d);
+                    if (next < 0) continue;
+                    float candidate = cost + 1f + danger[next];
+                    if (candidate >= routeCost[next]) continue;
+                    routeCost[next] = candidate; routeSteps[next] = routeSteps[current] + 1;
+                    routeFirst[next] = current == start ? next : routeFirst[current];
+                    PushRoute(next, candidate);
+                }
+            }
+            float best = float.PositiveInfinity;
+            for (int i = 0; i < Size; i++)
+            {
+                if (ExitDistances[i] != 0 || routeFirst[i] < 0 || routeSteps[i] > stepLimit) continue;
+                // 運搬1.05秒/歩と投げ動作等の1.5秒。間に合わない遠回りは採用しない。
+                if (routeSteps[i] * 1.05f + 1.5f > secondsLeft) continue;
+                // 前回の搬出口を10%優遇し、軽微な危険変化で出口を切り替え続けない。
+                float score = routeCost[i] * (i == previousExit ? 0.9f : 1f);
+                if (score >= best) continue;
+                best = score; chosenExit = i; nextStep = routeFirst[i];
+            }
+            return nextStep >= 0;
+        }
+
+        // 帰還では両端が既知で、両方の開口が一致した隣接セルだけを通す。
+        private int KnownNeighbor(int current, int direction)
+        {
+            int next = Neighbor(current, direction);
+            return next >= 0 && observed[next]
+                && (openings[next] & (1 << ((direction + 2) % 4))) != 0 ? next : -1;
+        }
+
+        // 小さいコストを先に取り出す二分ヒープ。古い値は取り出し時に捨てる。
+        private void PushRoute(int cell, float cost)
+        {
+            int index = heapCount++;
+            while (index > 0)
+            {
+                int parent = (index - 1) / 2;
+                if (heapCost[parent] <= cost) break;
+                heapCell[index] = heapCell[parent]; heapCost[index] = heapCost[parent]; index = parent;
+            }
+            heapCell[index] = cell; heapCost[index] = cost;
+        }
+
+        private void PopRoute(out int cell, out float cost)
+        {
+            cell = heapCell[0]; cost = heapCost[0];
+            int lastCell = heapCell[--heapCount]; float lastCost = heapCost[heapCount];
+            if (heapCount == 0) return;
+            int index = 0;
+            while (index * 2 + 1 < heapCount)
+            {
+                int child = index * 2 + 1;
+                if (child + 1 < heapCount && heapCost[child + 1] < heapCost[child]) child++;
+                if (heapCost[child] >= lastCost) break;
+                heapCell[index] = heapCell[child]; heapCost[index] = heapCost[child]; index = child;
+            }
+            heapCell[index] = lastCell; heapCost[index] = lastCost;
+        }
+
         /// <summary>このメンバーが到達できる既知搬出口のうち、最短のものを返す。</summary>
         internal int ClosestExit(int[] distances)
         {

@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 開発版: 4日目（2026-10-26）。既存6マップの全4開始位置を比較して採用した最終版。
+    /// 追加強化1（2026-10-26）。反撃と、可視の敵を避ける運搬経路を追加。対戦での効果は未測定。
     /// Ariadneの部隊全体を指揮するAI。4人へ探索・回収・帰還の仕事を割り当てる。
     /// 判断材料は公開SXG APIで取得した観測情報だけで、未観測の迷路は参照しない。
     /// </summary>
@@ -28,6 +28,9 @@ namespace Party0004838
         // goalsは前回の担当目標。assignedは今回の思考で仕事が確定済みかを表す。
         private int[] goals;
         private bool[] assigned;
+        // 可視の通常敵がいるセル周辺の危険と、各運搬者が前回選んだ搬出口。
+        private float[] danger;
+        private int[] returnExits;
 
         // 戦闘支援は同時に1人まで。継続時間と再開待ちの単位はゲーム内秒。
         private int tacticalMember = -1, tacticalEnemy = -1;
@@ -62,9 +65,10 @@ namespace Party0004838
                 members = new PartyMemberInfo[count];
                 distances = new int[count][]; firstSteps = new int[count][];
                 goals = new int[count]; assigned = new bool[count];
+                danger = new float[graph.Size]; returnExits = new int[count];
                 for (int i = 0; i < count; i++)
                 {
-                    distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1;
+                    distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1; returnExits[i] = -1;
                 }
             }
             // 仲間の誰かが新しく観測した通路を取り込み、帰還距離も更新する。
@@ -73,22 +77,41 @@ namespace Party0004838
             for (int i = 0; i < members.Length; i++)
             {
                 SXG_TryGetMemberInfo(i, out members[i]);
+                // 搬出やKOで手ぶらになったら前回の出口への優遇も終了し、次の運搬へ引き継がない。
+                if (members[i] != null && !members[i].HasTreasure) returnExits[i] = -1;
                 // 気絶中・行動ロック中の仲間には新しい仕事を割り当てない。
                 assigned[i] = members[i] == null || members[i].IsKnockedOut || members[i].IsActionLocked;
                 if (assigned[i]) continue;
                 graph.Search(graph.Index(members[i].CurrentCell), distances[i], firstSteps[i]);
-                if (!members[i].HasTreasure) continue;
+            }
+            IReadOnlyList<VisibleCharacterData> visibleCharacters = SXG_GetVisibleCharacters();
+            tactics.Refresh(members, visibleCharacters, map);
+            bool hasDanger = RefreshDanger(visibleCharacters);
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (assigned[i] || !members[i].HasTreasure) continue;
 
                 // 運搬中は搬出を最優先にする。帰還担当を探索・回収で上書きしない。
-                // 自分の出発口に限らず、既知の経路で最も近い搬出口を選ぶ。
+                // 自分の出発口に限らず、既知経路の近さと可視の敵への接近を考慮する。
                 assigned[i] = true;
                 int exit = graph.ClosestExit(distances[i]);
-                if (exit >= 0) Move(i, exit); else SXG_StopMember(i);
+                // 敵が見えるときは、既知通路の範囲で危険を避ける帰還も比較する。
+                // 敵を避けるための際限のない遠回りはMap側の6歩・残り秒数で制限する。
+                if (hasDanger && graph.TrySaferReturn(graph.Index(members[i].CurrentCell), distances[i],
+                    danger, returnExits[i], 120f - (Time.time - startedAt), out int next, out int saferExit))
+                {
+                    returnExits[i] = saferExit;
+                    SXG_SetMemberMoveTargetCell(i, graph.Cell(next));
+                }
+                else
+                {
+                    returnExits[i] = exit;
+                    if (exit >= 0) Move(i, exit); else SXG_StopMember(i);
+                }
                 goals[i] = -1;
             }
             RememberTreasures();
-            tactics.Refresh(members, SXG_GetVisibleCharacters(), map);
-            AssignSupport(SXG_GetVisibleCharacters());
+            AssignSupport(visibleCharacters);
 
             // 「誰が・何をするか」の全組合せから、評価の高い組を1件ずつ確定する。
             // 先頭の仲間が遠くの宝を先取りするのを防ぎ、同じセルの担当も重複させない。
@@ -235,6 +258,21 @@ namespace Party0004838
             // 護衛は3歩、運搬者への迎撃は2歩以内の既知経路だけ。
             // 運搬速度2に対する通常速度3の差は小さいため、期限2.4秒で届きにくい追跡を減らす。
             return distance >= 0 && distance <= (defense ? 3 : 2);
+        }
+
+        /// <summary>今見えている、生存中かつ手ぶらの敵だけを運搬経路の危険として扱う。</summary>
+        private bool RefreshDanger(IReadOnlyList<VisibleCharacterData> visible)
+        {
+            System.Array.Clear(danger, 0, danger.Length);
+            bool any = false;
+            foreach (VisibleCharacterData enemy in visible)
+            {
+                // 運搬中の敵自身は攻撃できない。自部隊のIDは公開メンバー一覧から識別する。
+                if (enemy.IsKnockedOut || enemy.HasTreasure || tactics.IsFriend(enemy.CharacterId)) continue;
+                graph.AddObservedDanger(danger, graph.Index(enemy.CellPosition));
+                any = true;
+            }
+            return any;
         }
 
         private void IssueSupport(int member, VisibleCharacterData enemy)
