@@ -1,5 +1,7 @@
 # リザルト宝箱の開封短縮 — アタッチするスクリプト1本
 
+**2026-10-26 型参照修正版。** `BattleResultTeamLane` と `BattleResultPresentation` をC#の型として直接参照する依存を外した。前の版で型が見つからないエラーが出た場合は、このフォルダーの最新のC#1本で同名ファイルを置き換える。
+
 [BattleResultFastForwardController.cs](BattleResultFastForwardController.cs) を、配布プロジェクトの `BattleResultPresentation` が付いたGameObjectへアタッチして使用する。既定のシーンでは、GameObjectの名前も **BattleResultPresentation**。追加のInspector参照は不要。
 
 ## 導入
@@ -43,8 +45,10 @@
 
 ## 対応範囲と確認状況
 
-対象は、この配布プロジェクトの `BattleResultPresentation` と `BattleResultTeamLane`。公開の時間設定APIがないため、結果表示のprivateなfloatフィールドを名前指定のReflectionで読み書きする。点数や宝箱結果は変更しない。
+対象は、配布プロジェクトの結果表示と金額ポップアップ。Unity標準の `MonoBehaviour` と `Component` で取得し、対象のfloat設定が2項目以上あることを確認して判別する。ゲーム側のクラス名、名前空間、ゲーム用asmdefへのコンパイル時の参照には依存しない。基底クラスにあるprivate設定も辿る。
 
-配布版の更新で対象のフィールド名が変わった場合は、Unity Consoleへ警告を出し、見つからない項目を飛ばす。この版はローカルの配布ソースとフィールド定義を照合したが、**Unity起動・コンパイル・再生確認は未実施**。実測による速度改善の確認はしていない。
+公開の時間設定APIがないため、結果表示のfloatフィールドを名前指定のReflectionで読み書きする。点数や宝箱結果は変更しない。型を参照するために別のゲームスクリプトをコピーしたり、asmdefの参照を追加したりする必要はない。
+
+フィールド名は配布版の定義に依存する。更新で設定名が変わった場合、対応する設定が2項目以上あれば見つからない項目を飛ばして警告する。結果表示自体を識別できない場合は、Consoleへエラーを出す。この版はローカルの配布ソースとフィールド定義を照合したが、**Unity起動・コンパイル・再生確認は未実施**。実測による速度改善の確認はしていない。
 
 結果画面用の補助なので、`Assets/Participants/Party0004838/` など参加者AIの提出フォルダーへは入れない。この公開分はC#1本と説明Markdownで、Prefab・meta・シーン・外部素材は含めない。

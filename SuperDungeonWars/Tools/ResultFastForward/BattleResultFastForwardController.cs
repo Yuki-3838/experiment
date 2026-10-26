@@ -6,6 +6,7 @@ using UnityEngine;
 /// BattleResultPresentationと同じGameObjectへ1本アタッチして、宝箱の開封と集計を短縮する。
 /// 配布版の実時間による待機にも対応するため、時間倍率ではなく待ち時間の設定値を変更する。
 /// Inspectorでの参照設定や、ほかのスクリプト・Prefab・シーンの書き換えは不要。
+/// ゲーム固有クラスの型は直接参照せず、待ち時間のフィールドを持つコンポーネントを実行時に探す。
 /// ゲーム画面用の補助であり、参加者AIの提出フォルダーには入れない。
 /// </summary>
 [DisallowMultipleComponent]
@@ -36,9 +37,10 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
     };
 
     private readonly List<FieldBackup> m_backups = new List<FieldBackup>();
-    private readonly List<BattleResultTeamLane> m_lanes = new List<BattleResultTeamLane>();
-    private readonly HashSet<BattleResultTeamLane> m_configuredLanes = new HashSet<BattleResultTeamLane>();
-    private BattleResultPresentation m_presentation;
+    // Unity標準の型だけで取得する。ゲーム用asmdefへの参照や、レーンのクラス名に依存しない。
+    private readonly List<MonoBehaviour> m_candidates = new List<MonoBehaviour>();
+    private readonly HashSet<MonoBehaviour> m_checkedChildren = new HashSet<MonoBehaviour>();
+    private MonoBehaviour m_presentation;
     private float m_activeMultiplier;
     private bool m_warnedMissingField;
 
@@ -59,11 +61,19 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
 
     private void OnEnable()
     {
-        m_presentation = GetComponent<BattleResultPresentation>();
+        m_presentation = null;
+        m_candidates.Clear();
+        GetComponents<MonoBehaviour>(m_candidates);
+        foreach (MonoBehaviour candidate in m_candidates)
+        {
+            if (candidate == null || candidate == this || !HasDurationSettings(candidate, PresentationLimits)) continue;
+            m_presentation = candidate;
+            break;
+        }
         if (m_presentation == null)
         {
             Debug.LogError(
-                "BattleResultFastForwardController: BattleResultPresentationと同じGameObjectにアタッチしてください。", this);
+                "BattleResultFastForwardController: 結果表示の待ち時間が見つかりません。BattleResultPresentationと同じGameObjectにアタッチしてください。", this);
             return;
         }
 
@@ -73,7 +83,7 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
         m_warnedMissingField = false;
         if (m_activeMultiplier <= 1.0f) return;
         ApplyLimits(m_presentation, PresentationLimits);
-        ConfigureSpawnedLanes();
+        ConfigureSpawnedPopups();
     }
 
     private void LateUpdate()
@@ -81,15 +91,41 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
         if (m_presentation == null || m_activeMultiplier <= 1.0f) return;
         // Showで後から生成される4チームのレーンを見つける。各インスタンスは1度だけ設定し、
         // 毎フレームの割り算で待ち時間が縮み続けることや、Prefabアセットの変更を避ける。
-        ConfigureSpawnedLanes();
+        ConfigureSpawnedPopups();
     }
 
-    private void ConfigureSpawnedLanes()
+    private void ConfigureSpawnedPopups()
     {
-        m_lanes.Clear();
-        m_presentation.GetComponentsInChildren<BattleResultTeamLane>(true, m_lanes);
-        foreach (BattleResultTeamLane lane in m_lanes)
-            if (lane != null && m_configuredLanes.Add(lane)) ApplyLimits(lane, LaneLimits);
+        m_candidates.Clear();
+        GetComponentsInChildren<MonoBehaviour>(true, m_candidates);
+        foreach (MonoBehaviour candidate in m_candidates)
+        {
+            // 該当しないUIコンポーネントも確認済みへ入れ、Reflectionを毎フレーム繰り返さない。
+            if (candidate == null || !m_checkedChildren.Add(candidate)) continue;
+            if (HasDurationSettings(candidate, LaneLimits)) ApplyLimits(candidate, LaneLimits);
+        }
+    }
+
+    private static bool HasDurationSettings(Component target, DurationLimit[] limits)
+    {
+        int matches = 0;
+        foreach (DurationLimit limit in limits)
+            // 無関係なコンポーネントを誤って選びにくくするため、float設定が2項目以上あるものに限定。
+            if (FindDurationField(target.GetType(), limit.FieldName) != null && ++matches >= 2) return true;
+        return false;
+    }
+
+    private static FieldInfo FindDurationField(System.Type type, string fieldName)
+    {
+        // 型名や名前空間は判定に使わない。基底クラスへ移動したprivate設定も取得できるよう辿る。
+        while (type != null && type != typeof(MonoBehaviour))
+        {
+            FieldInfo field = type.GetField(fieldName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field != null && field.FieldType == typeof(float) && !field.IsInitOnly) return field;
+            type = type.BaseType;
+        }
+        return null;
     }
 
     private void ApplyLimits(Component target, DurationLimit[] limits)
@@ -98,8 +134,8 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
         {
             // 配布版の待ち時間はprivateで公開の設定APIがないため、ここだけ名前を指定して参照する。
             // 対象は結果表示の秒数だけ。点数、宝箱の結果、AIの観測や対戦状態には触れない。
-            FieldInfo field = target.GetType().GetField(limit.FieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            if (field == null || field.FieldType != typeof(float))
+            FieldInfo field = FindDurationField(target.GetType(), limit.FieldName);
+            if (field == null)
             {
                 if (!m_warnedMissingField)
                 {
@@ -130,7 +166,7 @@ public sealed class BattleResultFastForwardController : MonoBehaviour
             if ((float)backup.Field.GetValue(backup.Target) == backup.Applied)
                 backup.Field.SetValue(backup.Target, backup.Original);
         }
-        m_backups.Clear(); m_lanes.Clear(); m_configuredLanes.Clear();
+        m_backups.Clear(); m_candidates.Clear(); m_checkedChildren.Clear();
         m_presentation = null;
     }
 }
