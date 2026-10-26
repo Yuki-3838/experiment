@@ -1,14 +1,14 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Party1111111
+namespace Party0004838
 {
     /// <summary>
-    /// 開発版: 3日目（2026-10-25）。護衛と敵運搬者への短い迎撃を追加した版。
+    /// 開発版: 4日目（2026-10-26）。既存6マップの全4開始位置を比較して採用した最終版。
     /// Ariadneの部隊全体を指揮するAI。4人へ探索・回収・帰還の仕事を割り当てる。
     /// 判断材料は公開SXG APIで取得した観測情報だけで、未観測の迷路は参照しない。
     /// </summary>
-    public sealed class Party1111111Party : ComPartyBase
+    public sealed class Party0004838Party : ComPartyBase
     {
         // 宝箱IDごとの最終観測情報。視界から消えても、一定時間は回収候補として覚えておく。
         private readonly Dictionary<int, TreasureMemory> treasures = new Dictionary<int, TreasureMemory>();
@@ -211,7 +211,7 @@ namespace Party1111111
                     // 追跡の上限2.4秒に近い回収機会を守り、護衛以外の寄り道を抑える。
                     // 味方の護衛なら候補には残すが、距離2マス相当の負担を評価へ加える。
                     if (collectingNearby && !defense) continue;
-                    // 護衛20・奪取10は無次元の優先度。候補の3〜4歩の距離差より護衛を重くする。
+                    // 護衛20・奪取10は無次元の優先度。候補の最大3歩の距離差より護衛を重くする。
                     float score = (defense ? 20f : 10f) - d - (collectingNearby ? 2f : 0f);
                     if (score > bestScore) { bestScore = score; bestMember = i; bestEnemy = enemy; }
                 }
@@ -232,8 +232,9 @@ namespace Party1111111
             int cell = graph.Index(enemy.CellPosition);
             if (cell < 0 || cell >= graph.Size) return false;
             int distance = distances[member][cell];
-            // 護衛は3歩、運搬者への迎撃は4歩以内の既知経路だけ。遠征には使わない。
-            return distance >= 0 && distance <= (defense ? 3 : 4);
+            // 護衛は3歩、運搬者への迎撃は2歩以内の既知経路だけ。
+            // 運搬速度2に対する通常速度3の差は小さいため、期限2.4秒で届きにくい追跡を減らす。
+            return distance >= 0 && distance <= (defense ? 3 : 2);
         }
 
         private void IssueSupport(int member, VisibleCharacterData enemy)

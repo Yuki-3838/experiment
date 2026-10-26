@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Party1111111
+namespace Party0004838
 {
     /// <summary>
-    /// 公開された既知マップを、最短経路を調べやすい配列へ写したもの。
+    /// 4日目（2026-10-26）の最終版。公開された既知マップを、最短経路を調べやすい配列へ写したもの。
     /// 未観測セルへは「入口の分かっている次の1マス」としてだけ進める。
     /// 未観測セルを通過して別の場所へ行く経路は作らない。
     /// </summary>

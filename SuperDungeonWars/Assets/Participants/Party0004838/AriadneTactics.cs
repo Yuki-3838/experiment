@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Party1111111
+namespace Party0004838
 {
     /// <summary>
-    /// 3日目（2026-10-25）の護衛用連絡帳。Partyが公開APIで得た観測だけを個人AIへ伝える。
+    /// 4日目（2026-10-26）の護衛用連絡帳。Partyが公開APIで得た観測だけを個人AIへ伝える。
     /// ゲーム本体や他部隊の実体を保持せず、自部隊のキャラクターIDごとに連絡帳を登録する。
     /// </summary>
     internal sealed class AriadneTactics

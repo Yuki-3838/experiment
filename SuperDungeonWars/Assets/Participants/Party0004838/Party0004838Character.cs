@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Party1111111
+namespace Party0004838
 {
     /// <summary>
-    /// 3日目（2026-10-25）の個人判断。味方運搬者への脅威を優先して迎撃する。移動先の決定はParty側に集約し、指示の競合を防ぐ。
+    /// 4日目（2026-10-26）の個人判断。味方運搬者への脅威を優先して迎撃する。移動先の決定はParty側に集約し、指示の競合を防ぐ。
     /// </summary>
-    public sealed class Party1111111Character : ComCharacterBase
+    public sealed class Party0004838Character : ComCharacterBase
     {
         /// <summary>
         /// ゲーム側が渡す攻撃可能な候補から、護衛対象への脅威、次に敵運搬者を選ぶ。
