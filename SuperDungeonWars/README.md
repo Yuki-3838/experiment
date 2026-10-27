@@ -32,9 +32,9 @@
 
 ## デバッグ用補助スクリプト
 
-[GameSpeed](Tools/GameSpeed/README.md) にゲーム全体をPause・0.25x・0.5x・1x・2x・5x・10xで操作するデバッグツールを保存した。GameObjectへ `GameSpeedDebugController` を付け、Play中にHierarchyから選ぶとInspectorに速度ボタンが出る。
+[GameSpeed](Tools/GameSpeed/README.md) はゲーム速度と結果の宝箱開封待ちを操作する1ファイルのデバッグツール。`GameSpeedDebugController.cs` をAssets以下へコピーし、常時有効なGameObjectに付ける。Play中にそのGameObjectを選ぶとInspectorに速度ボタンとSkip Result Waitsが出る。元の実時間版とスケール時間へ変更済みの結果処理をEditorで判別する。
 
-[ResultFastForward](Tools/ResultFastForward/README.md) は結果画面専用。ゲーム速度とは別に開封演出の時間設定を短縮し、必要なら順次開封を省略して結果をすぐ表示できる。結果画面のルートGameObjectへ `BattleResultFastForwardController.cs` を付ける。どちらも参加者AIの提出フォルダーには含めない。Unityでのコンパイル・再生確認は未実施。
+[ResultFastForward](Tools/ResultFastForward/README.md) は結果画面専用の旧ツール。新しいGameSpeedを使う場合は、同じ時間設定を二重に短縮しないよう旧コンポーネントを外す。これらのデバッグ用ファイルは参加者AIの提出フォルダーには含めない。
 
 ## 導入
 
