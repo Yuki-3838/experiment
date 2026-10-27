@@ -71,6 +71,28 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         s_session = null;
     }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    private static void CreateDebugControllerOnce()
+    {
+        // This callback runs once at startup, not on subsequent scene loads.
+        // Keep debug objects out of gameplay scenes so loops create no copies.
+        if (s_sessionOwner != null) return;
+#if UNITY_2022_2_OR_NEWER
+        GameSpeedDebugController[] existing =
+            UnityEngine.Object.FindObjectsByType<GameSpeedDebugController>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+#else
+        GameSpeedDebugController[] existing =
+            UnityEngine.Object.FindObjectsOfType<GameSpeedDebugController>(true);
+#endif
+        // Respect a manually attached controller, including a disabled one.
+        if (existing.Length != 0) return;
+        new GameObject(nameof(GameSpeedDebugController))
+            .AddComponent<GameSpeedDebugController>();
+    }
+#endif
+
     private sealed class TimingBackup
     {
         internal MonoBehaviour Target;

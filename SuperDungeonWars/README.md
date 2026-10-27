@@ -32,9 +32,9 @@
 
 ## デバッグ用補助スクリプト
 
-[GameSpeed](Tools/GameSpeed/README.md) はゲーム速度、結果の宝箱開封待ち、カメラフォーカスを操作する1ファイルのデバッグツール。`GameSpeedDebugController.cs` をAssets以下へコピーし、常時有効なGameObjectに付ける。Play中にそのGameObjectを選ぶとInspectorに速度ボタンとSkip Result Waitsが出る。Camera Focusでは赤・青・黄・緑を選び、1〜4番の登録メンバーへ追従できる。Autoで自動観戦へ戻る。結果処理は元の実時間版とスケール時間へ変更済みの版をEditorで判別する。
+[GameSpeed](Tools/GameSpeed/README.md) はゲーム速度、結果の宝箱開封待ち、カメラフォーカスを操作する1ファイルのデバッグツール。`GameSpeedDebugController.cs` をAssets以下へコピーすると、EditorのPlay開始時に1回だけ自動生成する。HierarchyのDontDestroyOnLoad内にあるGameSpeedDebugControllerを選ぶと、Inspectorに速度ボタンとSkip Result Waitsが出る。Camera Focusでは赤・青・黄・緑を選び、1〜4番の登録メンバーへ追従できる。Autoで自動観戦へ戻る。結果処理は元の実時間版とスケール時間へ変更済みの版をEditorで判別する。
 
-同じPlay中のシーン再読み込みでは速度・結果設定・カメラ選択を保持する。専用の空のルートGameObjectに付けると、デバッグ用オブジェクトが1つだけDontDestroyOnLoadに残る。次の試合で生成された同じ色・番号のキャラクターへカメラをつなぎ直す。
+同じPlay中のシーン再読み込みでは速度・結果設定・カメラ選択を保持する。デバッグ用オブジェクトはDontDestroyOnLoadに残り、MazeExploreの再読み込みでは再生成しない。旧版でシーンやPrefabに配置したものは外す。次の試合で生成された同じ色・番号のキャラクターへカメラをつなぎ直す。
 
 [ResultFastForward](Tools/ResultFastForward/README.md) は結果画面専用の旧ツール。新しいGameSpeedを使う場合は、同じ時間設定を二重に短縮しないよう旧コンポーネントを外す。これらのデバッグ用ファイルは参加者AIの提出フォルダーには含めない。
 

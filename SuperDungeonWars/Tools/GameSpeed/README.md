@@ -5,8 +5,10 @@
 ## 設置
 
 1. `GameSpeedDebugController.cs` を対象プロジェクトの `Assets/` 以下へコピーします。Editorフォルダには入れません。
-2. 子やほかのコンポーネントを持たない、専用の空のルートGameObjectに `GameSpeedDebugController` を1つアタッチします。
-3. Play中にそのGameObjectをHierarchyから選ぶと、Inspectorに操作ボタンが表示されます。
+2. 旧版でシーンやPrefabにアタッチした `GameSpeedDebugController` は外します。専用の空のGameObjectなら、そのGameObjectを削除します。
+3. Playすると、起動時に `GameSpeedDebugController` が1つだけ自動生成されます。Hierarchyの `DontDestroyOnLoad` 内でそのGameObjectを選ぶと、Inspectorに操作ボタンが表示されます。
+
+自動生成はEditorのPlayとDevelopment Buildで有効です。スクリプトのアタッチやシーンの変更は不要です。初期設定をシーンで指定したい場合は、専用の空のルートGameObjectに手動でアタッチする従来の使い方も可能です。その場合、再読み込みするシーンへの配置は避け、起動用シーンに置きます。
 
 旧版の `Editor/GameSpeedDebugControllerEditor.cs` は削除してください。Inspector用コードもこの1本に含まれています。旧 `BattleResultFastForwardController` がアタッチされている場合は外して、同じ待ち時間を二重に短縮しないようにします。
 
@@ -24,13 +26,13 @@
 
 Play中の設定はシーンを再読み込みしても引き継ぎます。保持するのはゲーム速度（Pauseを含む）、結果速度、Follow Game Speed、Skip Result Waits、Result Clock、チームのプルダウン選択、手動フォーカスの色と番号です。
 
-専用のデバッグ用GameObjectは `DontDestroyOnLoad` に残り、同じInspectorを使い続けられます。次のシーンから作られる重複コンポーネントは自動で除去します。MazeExploreのゲームオブジェクトを作り直してもデバッグ用オブジェクトは1つです。
+デバッグ用GameObjectの生成処理はPlay開始時に1回だけ実行し、生成したオブジェクトを `DontDestroyOnLoad` に残します。MazeExploreには配置しないため、再読み込みで新しいデバッグ用オブジェクトは生成されません。同じオブジェクトとInspectorを使い続けられます。手動配置された古いコピーがある場合の重複除去も残しています。
 
 カメラは古いキャラクターの参照を引き継がず、次の試合で生成される同じ色・番号のメンバーを探して追従します。生成待ちはInspectorにWaitingと表示します。Autoを押した場合は、次の試合も自動観戦になります。
 
 ほかの機能を持つGameObjectに取り付けた場合は、そのGameObjectをシーンに残さず設定のスナップショットを次の同コンポーネントへ復元します。ゲームのManagerやCanvasを意図せず残すことはありません。デバッグを無効にした状態も引き継ぎ、再有効化すると直前の設定を再適用します。
 
-保持する範囲は同じPlayセッションです。Playを停止して開始し直したときは、シーンに保存した初期設定から始まります。`Reset` の基準速度は、再読み込み後も最初の開始時の値です。
+保持する範囲は同じPlayセッションです。Playを停止して開始し直したときは、スクリプトの初期設定から始まります。手動配置の場合はシーンに保存した設定を使います。`Reset` の基準速度は、再読み込み後も最初の開始時の値です。
 
 ## カメラフォーカス
 
