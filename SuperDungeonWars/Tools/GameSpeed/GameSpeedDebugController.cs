@@ -47,6 +47,30 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     [SerializeField]
     private ResultClock m_resultClock = ResultClock.Automatic;
 
+    private sealed class DebugSessionState
+    {
+        internal float InitialSpeed, GameSpeed, LastPositiveSpeed, ResultSpeed;
+        internal bool Enabled, FollowGameSpeed, SkipWaits, CameraFocusRequested;
+        internal ResultClock Clock;
+        internal CameraTeam SelectedTeam, FocusedTeam;
+        internal int FocusedMember;
+#if UNITY_EDITOR
+        internal bool InspectorWasSelected;
+#endif
+    }
+
+    private static GameSpeedDebugController s_sessionOwner;
+    private static DebugSessionState s_session;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetDebugSession()
+    {
+        // A scene reload keeps the session; entering a new Play session clears it,
+        // including when the Editor's domain reload option is disabled.
+        s_sessionOwner = null;
+        s_session = null;
+    }
+
     private sealed class TimingBackup
     {
         internal MonoBehaviour Target;
@@ -68,10 +92,15 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         new Dictionary<Type, bool>();
 
     private float m_initialTimeScale = 1.0f;
+    private float m_currentGameSpeed = 1.0f;
     private float m_lastPositiveTimeScale = 1.0f;
     private float m_nextDiscoveryTime;
     private bool m_isControlling;
     private readonly CameraFocusBridge m_debugCamera = new CameraFocusBridge();
+    private bool m_restoreSpeedAfterSceneStart;
+    private bool m_cameraFocusRequested, m_waitingForCamera;
+    private CameraTeam m_focusedCameraTeam;
+    private int m_focusedCameraMember;
 
     public float ResultSpeed { get { return m_resultSpeed; } }
     public int ResultTargetCount { get { return m_knownTargets.Count; } }
@@ -83,8 +112,18 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     }
     public int SelectedCameraTeamIndex { get { return m_debugCamera.TeamIndex(m_cameraTeam); } }
     public Color SelectedCameraTeamColor { get { return m_debugCamera.TeamColor(m_cameraTeam); } }
-    public string CameraFocusStatus { get { return m_debugCamera.Status; } }
+    public string CameraFocusStatus
+    {
+        get
+        {
+            return IsCameraFocusPending
+                ? "Waiting: " + m_focusedCameraTeam + " / " + m_focusedCameraMember
+                    + "（次のキャラクター生成待ち）"
+                : m_debugCamera.Status;
+        }
+    }
     public bool IsManualCameraFocus { get { return m_debugCamera.IsManual; } }
+    public bool IsCameraFocusPending { get { return m_cameraFocusRequested && m_waitingForCamera; } }
 
     public bool CanFocusCameraMember(int memberNumber)
     {
@@ -96,26 +135,81 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     {
         if (!Application.isPlaying || !isActiveAndEnabled) return false;
         RefreshResultTimings();
-        return m_debugCamera.Focus(m_cameraTeam, memberNumber);
+        if (!m_debugCamera.Focus(m_cameraTeam, memberNumber)) return false;
+        m_cameraFocusRequested = true;
+        m_waitingForCamera = false;
+        m_focusedCameraTeam = m_cameraTeam;
+        m_focusedCameraMember = memberNumber;
+        SaveSession();
+        return true;
     }
 
     public void ReturnAutomaticCamera()
     {
+        m_cameraFocusRequested = m_waitingForCamera = false;
         m_debugCamera.Release();
+        SaveSession();
     }
 
     private void OnEnable()
     {
         if (!Application.isPlaying) return;
-        m_initialTimeScale = Time.timeScale;
+        if (s_sessionOwner != null && s_sessionOwner != this)
+        {
+            // A reloaded scene includes another copy of the component. Never
+            // allow that copy to replace the live controls or reset the clock.
+            enabled = false;
+#if UNITY_EDITOR
+            if (Selection.activeGameObject == gameObject || Selection.activeObject == this)
+                Selection.activeGameObject = s_sessionOwner.gameObject;
+#endif
+            if (IsDedicatedDebugObject()) Destroy(gameObject);
+            else Destroy(this);
+            return;
+        }
+
+        bool sameOwner = s_sessionOwner == this;
+        bool restoreDisabled = !sameOwner && s_session != null && !s_session.Enabled;
+        s_sessionOwner = this;
+        if (!sameOwner)
+        {
+            if (s_session != null) RestoreSession();
+            else
+            {
+                m_initialTimeScale = m_currentGameSpeed = Time.timeScale;
+                m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
+            }
+        }
+        // Keeping an arbitrary manager or Canvas alive would preserve game
+        // state too. Only a dedicated, empty debug root is made persistent.
+        // Shared hosts use the session snapshot when their scene recreates them.
+        if (IsDedicatedDebugObject()) DontDestroyOnLoad(gameObject);
+        if (restoreDisabled)
+        {
+            RestoreInspectorSelection();
+            enabled = false;
+            return;
+        }
+        Time.timeScale = m_currentGameSpeed;
+        m_restoreSpeedAfterSceneStart = true;
         m_isControlling = true;
+        m_waitingForCamera = m_cameraFocusRequested;
         SceneManager.sceneLoaded += OnSceneLoaded;
+        SceneManager.sceneUnloaded += OnSceneUnloaded;
+        RestoreInspectorSelection();
         RefreshResultTimings();
     }
 
     private void LateUpdate()
     {
         if (!m_isControlling) return;
+        if (m_restoreSpeedAfterSceneStart)
+        {
+            // Start() in the new scene can reset timeScale after sceneLoaded.
+            Time.timeScale = m_currentGameSpeed;
+            m_restoreSpeedAfterSceneStart = false;
+        }
+        else m_currentGameSpeed = Time.timeScale;
         SynchronizeSpeeds();
 
         // Find new result roots even when initially inactive or in another scene.
@@ -137,7 +231,20 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         ApplyTimings();
         // This script runs before the spectator camera's LateUpdate. Reapply the
         // manual target after the game's automatic selection in Update().
+        bool wasManual = m_debugCamera.IsManual;
         m_debugCamera.Tick();
+        if (IsCameraFocusPending)
+        {
+            if (m_debugCamera.CanFocus(m_focusedCameraTeam, m_focusedCameraMember)
+                && m_debugCamera.Focus(m_focusedCameraTeam, m_focusedCameraMember))
+                m_waitingForCamera = false;
+        }
+        else if (wasManual && !m_debugCamera.IsManual)
+        {
+            // A target removed inside the same match still returns to Auto.
+            m_cameraFocusRequested = false;
+        }
+        SaveSession();
     }
 
     public void SetGameSpeed(float speedMultiplier)
@@ -146,6 +253,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
             || !IsFinite(speedMultiplier)) return;
 
         Time.timeScale = Mathf.Clamp(speedMultiplier, 0.0f, 100.0f);
+        m_currentGameSpeed = Time.timeScale;
         RefreshResultTimings();
     }
 
@@ -163,6 +271,8 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     {
         if (!Application.isPlaying || !isActiveAndEnabled) return;
         Time.timeScale = m_initialTimeScale;
+        m_currentGameSpeed = Time.timeScale;
+        m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
         m_resultSpeed = 1.0f;
         m_skipResultWaits = false;
         RefreshResultTimings();
@@ -174,6 +284,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         SynchronizeSpeeds();
         DiscoverSceneTargets();
         ApplyTimings();
+        SaveSession();
     }
 
     private void SynchronizeSpeeds()
@@ -188,7 +299,73 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        Time.timeScale = m_currentGameSpeed;
+        m_restoreSpeedAfterSceneStart = true;
+        RestoreInspectorSelection();
         RefreshResultTimings();
+        if (m_cameraFocusRequested && !m_debugCamera.IsManual)
+            m_waitingForCamera = true;
+    }
+
+    private void OnSceneUnloaded(Scene scene)
+    {
+        if (m_debugCamera.ReferencesScene(scene.handle))
+        {
+            m_waitingForCamera = m_cameraFocusRequested;
+            m_debugCamera.Shutdown();
+        }
+        SaveSession(true);
+    }
+
+    private bool IsDedicatedDebugObject()
+    {
+        return transform.parent == null && transform.childCount == 0
+            && GetComponents<Component>().Length == 2;
+    }
+
+    private void SaveSession(bool preserveSelection = false)
+    {
+        if (!m_isControlling || s_sessionOwner != this) return;
+        if (s_session == null) s_session = new DebugSessionState();
+        s_session.InitialSpeed = m_initialTimeScale;
+        s_session.GameSpeed = m_currentGameSpeed;
+        s_session.LastPositiveSpeed = m_lastPositiveTimeScale;
+        s_session.ResultSpeed = m_resultSpeed;
+        s_session.Enabled = enabled;
+        s_session.FollowGameSpeed = m_followGameSpeed;
+        s_session.SkipWaits = m_skipResultWaits;
+        s_session.Clock = m_resultClock;
+        s_session.SelectedTeam = m_cameraTeam;
+        s_session.CameraFocusRequested = m_cameraFocusRequested;
+        s_session.FocusedTeam = m_focusedCameraTeam;
+        s_session.FocusedMember = m_focusedCameraMember;
+#if UNITY_EDITOR
+        if (!preserveSelection || Selection.activeObject != null)
+            s_session.InspectorWasSelected = Selection.activeGameObject == gameObject;
+#endif
+    }
+
+    private void RestoreSession()
+    {
+        m_initialTimeScale = s_session.InitialSpeed;
+        m_currentGameSpeed = s_session.GameSpeed;
+        m_lastPositiveTimeScale = s_session.LastPositiveSpeed;
+        m_resultSpeed = s_session.ResultSpeed;
+        m_followGameSpeed = s_session.FollowGameSpeed;
+        m_skipResultWaits = s_session.SkipWaits;
+        m_resultClock = s_session.Clock;
+        m_cameraTeam = s_session.SelectedTeam;
+        m_cameraFocusRequested = s_session.CameraFocusRequested;
+        m_focusedCameraTeam = s_session.FocusedTeam;
+        m_focusedCameraMember = s_session.FocusedMember;
+    }
+
+    private void RestoreInspectorSelection()
+    {
+#if UNITY_EDITOR
+        if (s_session != null && s_session.InspectorWasSelected)
+            Selection.activeGameObject = gameObject;
+#endif
     }
 
     private void DiscoverSceneTargets()
@@ -331,7 +508,9 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 
     private void OnDisable()
     {
+        SaveSession(true);
         SceneManager.sceneLoaded -= OnSceneLoaded;
+        SceneManager.sceneUnloaded -= OnSceneUnloaded;
         m_debugCamera.Shutdown();
         if (!m_isControlling) return;
         foreach (TimingBackup timing in m_timings)
@@ -346,6 +525,11 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         m_resultRoots.Clear();
         m_clockCache.Clear();
         m_isControlling = false;
+    }
+
+    private void OnDestroy()
+    {
+        if (s_sessionOwner == this) s_sessionOwner = null;
     }
 
     private sealed class CameraFocusBridge
@@ -367,6 +551,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         private MethodInfo m_setCharacter, m_snap, m_setIndicator, m_resumeAutomatic;
         private object[] m_focusArguments, m_indicatorArguments;
         private int m_targetTeam, m_previousTeam;
+        private int m_gameSceneHandle = -1, m_focusSceneHandle = -1;
 
         public bool IsManual { get; private set; }
         public string Status { get; private set; } = "Auto";
@@ -375,6 +560,10 @@ public sealed class GameSpeedDebugController : MonoBehaviour
             return m_teamIndices[Mathf.Clamp((int)team, 0, 3)];
         }
         public Color TeamColor(CameraTeam team) { return m_teamColors[TeamIndex(team)]; }
+        public bool ReferencesScene(int handle)
+        {
+            return m_gameSceneHandle == handle || m_focusSceneHandle == handle;
+        }
 
         public void Discover(MonoBehaviour behaviour)
         {
@@ -384,6 +573,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
                 && (m_game == behaviour || m_game.isActiveAndEnabled)) return;
             Release();
             m_game = behaviour;
+            m_gameSceneHandle = behaviour.gameObject.scene.handle;
             m_camera = ReadField(m_game, "m_battleSpectatorCameraController") as MonoBehaviour;
             m_indicator = ReadField(m_game, "m_battleSpectatorFocusIndicatorView") as MonoBehaviour;
             m_parties = m_game.GetType().GetProperty("SpawnedParties", InstanceFlags);
@@ -444,6 +634,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
                 m_previousTeam = m_focusParty == null ? -1 : (int)m_focusParty.GetValue(m_game);
             }
             m_target = member;
+            m_focusSceneHandle = member.gameObject.scene.handle;
             m_targetTeam = TeamIndex(team);
             m_focusArguments = new object[] { member };
             m_indicatorArguments = new object[] { member, m_targetTeam };
@@ -509,6 +700,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         {
             Release();
             m_game = m_camera = m_indicator = null;
+            m_gameSceneHandle = m_focusSceneHandle = -1;
             m_memberMethods.Clear();
         }
 
