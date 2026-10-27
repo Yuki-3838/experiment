@@ -47,37 +47,12 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     [SerializeField]
     private ResultClock m_resultClock = ResultClock.Automatic;
 
-    private sealed class DebugSessionState
-    {
-        internal float InitialSpeed, GameSpeed, LastPositiveSpeed, ResultSpeed;
-        internal bool Enabled, FollowGameSpeed, SkipWaits, CameraFocusRequested;
-        internal ResultClock Clock;
-        internal CameraTeam SelectedTeam, FocusedTeam;
-        internal int FocusedMember;
-#if UNITY_EDITOR
-        internal bool InspectorWasSelected;
-#endif
-    }
-
-    private static GameSpeedDebugController s_sessionOwner;
-    private static DebugSessionState s_session;
-
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetDebugSession()
-    {
-        // A scene reload keeps the session; entering a new Play session clears it,
-        // including when the Editor's domain reload option is disabled.
-        s_sessionOwner = null;
-        s_session = null;
-    }
-
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void CreateDebugControllerOnce()
     {
         // This callback runs once at startup, not on subsequent scene loads.
         // Keep debug objects out of gameplay scenes so loops create no copies.
-        if (s_sessionOwner != null) return;
 #if UNITY_2022_2_OR_NEWER
         GameSpeedDebugController[] existing =
             UnityEngine.Object.FindObjectsByType<GameSpeedDebugController>(
@@ -162,7 +137,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         m_waitingForCamera = false;
         m_focusedCameraTeam = m_cameraTeam;
         m_focusedCameraMember = memberNumber;
-        SaveSession();
         return true;
     }
 
@@ -170,55 +144,26 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     {
         m_cameraFocusRequested = m_waitingForCamera = false;
         m_debugCamera.Release();
-        SaveSession();
+    }
+
+    private void Awake()
+    {
+        if (!Application.isPlaying) return;
+        m_initialTimeScale = m_currentGameSpeed = Time.timeScale;
+        m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
+        // The same object and its fields survive for the whole Play session.
+        if (IsDedicatedDebugObject()) DontDestroyOnLoad(gameObject);
     }
 
     private void OnEnable()
     {
         if (!Application.isPlaying) return;
-        if (s_sessionOwner != null && s_sessionOwner != this)
-        {
-            // A reloaded scene includes another copy of the component. Never
-            // allow that copy to replace the live controls or reset the clock.
-            enabled = false;
-#if UNITY_EDITOR
-            if (Selection.activeGameObject == gameObject || Selection.activeObject == this)
-                Selection.activeGameObject = s_sessionOwner.gameObject;
-#endif
-            if (IsDedicatedDebugObject()) Destroy(gameObject);
-            else Destroy(this);
-            return;
-        }
-
-        bool sameOwner = s_sessionOwner == this;
-        bool restoreDisabled = !sameOwner && s_session != null && !s_session.Enabled;
-        s_sessionOwner = this;
-        if (!sameOwner)
-        {
-            if (s_session != null) RestoreSession();
-            else
-            {
-                m_initialTimeScale = m_currentGameSpeed = Time.timeScale;
-                m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
-            }
-        }
-        // Keeping an arbitrary manager or Canvas alive would preserve game
-        // state too. Only a dedicated, empty debug root is made persistent.
-        // Shared hosts use the session snapshot when their scene recreates them.
-        if (IsDedicatedDebugObject()) DontDestroyOnLoad(gameObject);
-        if (restoreDisabled)
-        {
-            RestoreInspectorSelection();
-            enabled = false;
-            return;
-        }
         Time.timeScale = m_currentGameSpeed;
         m_restoreSpeedAfterSceneStart = true;
         m_isControlling = true;
         m_waitingForCamera = m_cameraFocusRequested;
         SceneManager.sceneLoaded += OnSceneLoaded;
         SceneManager.sceneUnloaded += OnSceneUnloaded;
-        RestoreInspectorSelection();
         RefreshResultTimings();
     }
 
@@ -266,7 +211,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
             // A target removed inside the same match still returns to Auto.
             m_cameraFocusRequested = false;
         }
-        SaveSession();
     }
 
     public void SetGameSpeed(float speedMultiplier)
@@ -306,7 +250,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         SynchronizeSpeeds();
         DiscoverSceneTargets();
         ApplyTimings();
-        SaveSession();
     }
 
     private void SynchronizeSpeeds()
@@ -323,7 +266,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     {
         Time.timeScale = m_currentGameSpeed;
         m_restoreSpeedAfterSceneStart = true;
-        RestoreInspectorSelection();
         RefreshResultTimings();
         if (m_cameraFocusRequested && !m_debugCamera.IsManual)
             m_waitingForCamera = true;
@@ -336,58 +278,12 @@ public sealed class GameSpeedDebugController : MonoBehaviour
             m_waitingForCamera = m_cameraFocusRequested;
             m_debugCamera.Shutdown();
         }
-        SaveSession(true);
     }
 
     private bool IsDedicatedDebugObject()
     {
         return transform.parent == null && transform.childCount == 0
             && GetComponents<Component>().Length == 2;
-    }
-
-    private void SaveSession(bool preserveSelection = false)
-    {
-        if (!m_isControlling || s_sessionOwner != this) return;
-        if (s_session == null) s_session = new DebugSessionState();
-        s_session.InitialSpeed = m_initialTimeScale;
-        s_session.GameSpeed = m_currentGameSpeed;
-        s_session.LastPositiveSpeed = m_lastPositiveTimeScale;
-        s_session.ResultSpeed = m_resultSpeed;
-        s_session.Enabled = enabled;
-        s_session.FollowGameSpeed = m_followGameSpeed;
-        s_session.SkipWaits = m_skipResultWaits;
-        s_session.Clock = m_resultClock;
-        s_session.SelectedTeam = m_cameraTeam;
-        s_session.CameraFocusRequested = m_cameraFocusRequested;
-        s_session.FocusedTeam = m_focusedCameraTeam;
-        s_session.FocusedMember = m_focusedCameraMember;
-#if UNITY_EDITOR
-        if (!preserveSelection || Selection.activeObject != null)
-            s_session.InspectorWasSelected = Selection.activeGameObject == gameObject;
-#endif
-    }
-
-    private void RestoreSession()
-    {
-        m_initialTimeScale = s_session.InitialSpeed;
-        m_currentGameSpeed = s_session.GameSpeed;
-        m_lastPositiveTimeScale = s_session.LastPositiveSpeed;
-        m_resultSpeed = s_session.ResultSpeed;
-        m_followGameSpeed = s_session.FollowGameSpeed;
-        m_skipResultWaits = s_session.SkipWaits;
-        m_resultClock = s_session.Clock;
-        m_cameraTeam = s_session.SelectedTeam;
-        m_cameraFocusRequested = s_session.CameraFocusRequested;
-        m_focusedCameraTeam = s_session.FocusedTeam;
-        m_focusedCameraMember = s_session.FocusedMember;
-    }
-
-    private void RestoreInspectorSelection()
-    {
-#if UNITY_EDITOR
-        if (s_session != null && s_session.InspectorWasSelected)
-            Selection.activeGameObject = gameObject;
-#endif
     }
 
     private void DiscoverSceneTargets()
@@ -530,7 +426,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 
     private void OnDisable()
     {
-        SaveSession(true);
         SceneManager.sceneLoaded -= OnSceneLoaded;
         SceneManager.sceneUnloaded -= OnSceneUnloaded;
         m_debugCamera.Shutdown();
@@ -547,11 +442,6 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         m_resultRoots.Clear();
         m_clockCache.Clear();
         m_isControlling = false;
-    }
-
-    private void OnDestroy()
-    {
-        if (s_sessionOwner == this) s_sessionOwner = null;
     }
 
     private sealed class CameraFocusBridge
