@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化4（2026-10-27）の個人判断。反撃と、中央担当・入口担当の取得方針を反映する。
+    /// 追加強化3（2026-10-26）の個人判断。反撃と、中央担当だけの宝箱取得の選別を行う。
     /// 移動先の決定はParty側に集約し、戦うためだけの追跡はここでは行わない。
     /// </summary>
     public sealed class Party0004838Character : ComCharacterBase
@@ -40,14 +40,10 @@ namespace Party0004838
             return best;
         }
 
-        // 入口役は奪取または切り替え回収の間だけ取得する。待機・配置への移動中は寄り道を抑える。
-        // 回収担当が中央へ向かう間は、途中の通常宝箱を拾って金宝箱への到達が遅れないようにする。
+        // 中央担当1人は、途中の通常宝箱で運搬を始めて目的を失わないよう選別する。
+        // ほかの仲間と、中央担当を解除された仲間は、従来どおり通常宝箱も拾える。
         protected override bool SXG_ShouldPickUpTreasure(TreasureType type)
-        {
-            if (SXG_HasTreasure) return false;
-            if (AriadneTactics.TryGetAmbushPickup(SXG_CharacterId, out bool allowed)) return allowed;
-            return type == TreasureType.CentralChest || !AriadneTactics.IsCentralRunner(SXG_CharacterId);
-        }
+            => !SXG_HasTreasure && (type == TreasureType.CentralChest || !AriadneTactics.IsCentralRunner(SXG_CharacterId));
 
         // 自分の搬出という公開イベントを連絡帳へ返し、空になった中央の探索を再開させない。
         protected override void SXG_OnTreasureExported(TreasureType type)

@@ -1,9 +1,9 @@
 using UnityEngine;
 
-namespace Party0004838
+namespace AriadneEntranceAmbush
 {
     /// <summary>
-    /// 追加強化4（2026-10-27）。入口担当と、運搬者が来ないときの切り替え時間を管理する。
+    /// 独立待ち伏せ版（2026-10-27）。同じ敵入口へ3人を配置し、待機と一時回収を管理する。
     /// 公開マップの寸法と自分の出発口だけを使う補助クラス。アタッチは不要。
     /// </summary>
     internal sealed class AriadneAmbush
@@ -12,6 +12,7 @@ namespace Party0004838
         private readonly int[] entranceByMember;
         private readonly float[] quietSince, forageUntil;
         private int home = -1;
+        private int targetEntrance = -1;
         private bool fallbackEnabled;
 
         internal AriadneAmbush(int count, int width, int height)
@@ -23,7 +24,7 @@ namespace Party0004838
             for (int i = 0; i < count; i++) { entranceByMember[i] = -1; quietSince[i] = -1f; }
         }
 
-        internal bool ConfigureHome(Vector2Int ownEntrance)
+        internal bool ConfigureHome(Vector2Int ownEntrance, int[] knownDistances, int width)
         {
             int own = -1;
             for (int i = 0; i < entrances.Length; i++) if (entrances[i] == ownEntrance) own = i;
@@ -31,23 +32,41 @@ namespace Party0004838
             if (home == own) return true;
             home = own;
             for (int i = 0; i < entranceByMember.Length; i++) entranceByMember[i] = -1;
-            // メンバー0を回収担当として残し、残りを別々の3入口へ固定して担当の入れ替わりを抑える。
-            int member = 1;
-            for (int i = 0; i < entrances.Length && member < entranceByMember.Length; i++)
-                if (i != own) entranceByMember[member++] = i;
+            // 経路が既知の敵入口があれば最短を選ぶ。未知なら座標上で近い入口を目標にする。
+            // 座標差は誘導用であり、壁の向こうへ直進できるという意味ではない。
+            int bestKnown = int.MaxValue, bestEstimate = int.MaxValue;
+            targetEntrance = -1;
+            for (int i = 0; i < entrances.Length; i++)
+            {
+                if (i == own) continue;
+                Vector2Int exit = entrances[i];
+                int d = knownDistances[exit.y * width + exit.x];
+                int estimate = Mathf.Abs(exit.x - ownEntrance.x) + Mathf.Abs(exit.y - ownEntrance.y);
+                if (d >= 0 && d < bestKnown)
+                { bestKnown = d; targetEntrance = i; }
+                else if (bestKnown == int.MaxValue && estimate < bestEstimate)
+                { bestEstimate = estimate; targetEntrance = i; }
+            }
+            // メンバー0は回収専任。1〜3は同じ敵入口を守り、別の入口へ分散しない。
+            for (int member = 1; member < entranceByMember.Length; member++)
+                entranceByMember[member] = targetEntrance;
             ResetTimers();
             return true;
         }
 
         internal bool IsAmbusher(int member) => entranceByMember[member] >= 0;
+        internal Vector2Int TargetEntrance => entrances[targetEntrance];
 
         internal Vector2Int Post(int member, KnownMapView map)
         {
             Vector2Int exit = entrances[entranceByMember[member]];
             Vector2Int inward = exit.y == map.Height - 1 ? Vector2Int.down : exit.y == 0 ? Vector2Int.up
                 : exit.x == map.Width - 1 ? Vector2Int.left : Vector2Int.right;
-            // 接続を確認できたら入口1マス手前で構える。未知の接続は仮定しない。
-            return map.CanMove(exit, exit + inward) ? exit + inward : exit;
+            // 入口から1・2・3マス内側へずらして構え、全員が同一点へ重なるのを抑える。
+            // 開口を観測した範囲だけ進め、曲がり角や未知の通路へは配置を延ばさない。
+            Vector2Int post = exit;
+            for (int step = 0; step < member && map.CanMove(post, post + inward); step++) post += inward;
+            return post;
         }
 
         internal void SetFallbackEnabled(bool enabled)

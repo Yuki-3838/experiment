@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化4（2026-10-27）の連絡帳。護衛・中央担当と、入口役の取得許可を個人AIへ伝える。
+    /// 追加強化3（2026-10-26）の連絡帳。公開観測による護衛対象と中央担当を個人AIへ伝える。
     /// ゲーム本体や他部隊の実体を保持せず、自部隊のキャラクターIDごとに連絡帳を登録する。
     /// </summary>
     internal sealed class AriadneTactics
@@ -12,7 +12,6 @@ namespace Party0004838
         private static readonly Dictionary<int, AriadneTactics> Boards = new Dictionary<int, AriadneTactics>();
         private readonly HashSet<int> friends = new HashSet<int>(), threats = new HashSet<int>();
         private readonly List<int> registered = new List<int>();
-        private readonly Dictionary<int, bool> ambushPickup = new Dictionary<int, bool>();
         private float observedAt;
         private int centralRunnerId = -1;
         // 自部隊の公開搬出フックでのみ確定する。敵の見えない行動から搬出を推測しない。
@@ -23,7 +22,6 @@ namespace Party0004838
         {
             Release();
             friends.Clear(); threats.Clear(); observedAt = Time.time;
-            ambushPickup.Clear();
             centralRunnerId = -1;
             foreach (PartyMemberInfo member in members)
             {
@@ -49,20 +47,6 @@ namespace Party0004838
 
         internal bool IsFriend(int characterId) => friends.Contains(characterId);
         internal bool ThreatensCarrier(int characterId) => threats.Contains(characterId);
-
-        internal void SetAmbushPickup(int characterId, bool allowed)
-        {
-            if (friends.Contains(characterId)) ambushPickup[characterId] = allowed;
-        }
-
-        internal static bool TryGetAmbushPickup(int memberId, out bool allowed)
-        {
-            allowed = false;
-            if (!Boards.TryGetValue(memberId, out AriadneTactics board)) return false;
-            float age = Time.time - board.observedAt;
-            // 自分の部隊からの新しい許可だけを使う。0.36秒で失効する。
-            return age >= 0f && age <= 0.36f && board.ambushPickup.TryGetValue(memberId, out allowed);
-        }
 
         internal void SetCentralRunner(int characterId)
         {
