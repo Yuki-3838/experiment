@@ -1,12 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
+using SuperDungeonWars.AI;
 
 namespace AriadneEntranceAmbush
 {
     /// <summary>
     /// 独立待ち伏せ版（2026-10-27）。回収・入口迎撃に使う既知経路と帰還・中央の確認先を求める。
-    /// 未観測セルへは「入口の分かっている次の1マス」としてだけ進める。
-    /// 未観測セルを通過して別の場所へ行く経路は作らない。
+    /// 観測地形と汎用C4ビューの回転推定で経路を作る。推定と実測は分けて保持する。
+    /// 完全未知のセルは探索の終点にだけ使う。宝や敵の位置を回転コピーしない。
     /// </summary>
     internal sealed class AriadneMap
     {
@@ -16,7 +17,9 @@ namespace AriadneEntranceAmbush
         private static readonly MazeDirection[] Flags =
             { MazeDirection.North, MazeDirection.East, MazeDirection.South, MazeDirection.West };
         private readonly int width, height;
-        private readonly bool[] observed;
+        // observedは実測、knownは実測＋回転推定。宝の探索と経路の計画を混同しない。
+        private readonly bool[] observed, known;
+        internal C4SymmetricMap Terrain { get; }
         // 中央ホールの範囲は公開IsCentralHallから取得する。訪問記録は自部隊の現在セルだけから作る。
         private readonly bool[] centralHall, centralVisited;
 
@@ -41,7 +44,9 @@ namespace AriadneEntranceAmbush
         internal AriadneMap(int width, int height)
         {
             this.width = width; this.height = height;
-            observed = new bool[Size]; openings = new int[Size]; queue = new int[Size];
+            observed = new bool[Size]; known = new bool[Size];
+            Terrain = new C4SymmetricMap(width, height);
+            openings = new int[Size]; queue = new int[Size];
             centralHall = new bool[Size]; centralVisited = new bool[Size];
             ExitDistances = new int[Size]; exitFirst = new int[Size];
             routeCost = new float[Size]; routeFirst = new int[Size]; routeSteps = new int[Size];
@@ -101,14 +106,14 @@ namespace AriadneEntranceAmbush
         /// <summary>新しく見えたセルを取り込み、探索候補と帰還距離を更新する。</summary>
         internal void Refresh(KnownMapView map)
         {
-            // このゲームでは一度分かった通路は変化しないため、観測済みセルは再取得しない。
+            // 汎用ビューへ自部隊の観測だけを渡す。矛盾したら推定が消えるため毎回上書きする。
+            Terrain.Refresh(map);
             for (int i = 0; i < Size; i++)
             {
-                if (observed[i]) continue;
-                if (!map.TryGetCell(Cell(i), out KnownCellInfo info) || !info.IsObserved) continue;
-                observed[i] = true;
+                Terrain.TryGetCell(Cell(i), out SymmetricCell info);
+                observed[i] = info.IsObserved; known[i] = info.IsKnown;
                 centralHall[i] = info.IsCentralHall && info.IsWalkable;
-                for (int d = 0; d < 4; d++) if (info.IsOpen(Flags[d])) openings[i] |= 1 << d;
+                openings[i] = (int)info.OpenDirections;
             }
             // 観測済みセルの開口だけを根拠に、隣の未観測セルを列挙する。
             Frontiers.Clear();
@@ -129,10 +134,10 @@ namespace AriadneEntranceAmbush
             Seed((height / 2) * width, ref tail); Seed((height / 2) * width + width - 1, ref tail);
             Flood(ExitDistances, exitFirst, tail, false);
         }
-        // 未観測・通行不能の入口は帰還先として仮定しない。
+        // 実測・回転推定のどちらでも接続のない入口は帰還先にしない。
         private void Seed(int cell, ref int tail)
         {
-            if (!observed[cell] || openings[cell] == 0 || ExitDistances[cell] >= 0) return;
+            if (!known[cell] || openings[cell] == 0 || ExitDistances[cell] >= 0) return;
             ExitDistances[cell] = 0; exitFirst[cell] = cell; queue[tail++] = cell;
         }
         /// <summary>
@@ -153,7 +158,7 @@ namespace AriadneEntranceAmbush
         }
         /// <summary>
         /// 各移動のコストを1として近いセルから順に調べる共通処理。
-        /// allowFrontierがtrueの探索では未観測の終点も記録し、帰還では既知セルだけを通す。
+        /// allowFrontierがtrueなら完全未知の終点も記録する。帰還は実測・回転推定の接続だけを通す。
         /// </summary>
         private void Flood(int[] distances, int[] first, int tail, bool allowFrontier)
         {
@@ -165,7 +170,7 @@ namespace AriadneEntranceAmbush
                 {
                     int next = Neighbor(current, d);
                     if (next < 0 || distances[next] >= 0) continue;
-                    if (observed[next])
+                    if (known[next])
                     {
                         // 通路の両側が開いていることを確認する。逆方向は4方向の2つ先。
                         if ((openings[next] & (1 << ((d + 2) % 4))) == 0) continue;
@@ -175,8 +180,8 @@ namespace AriadneEntranceAmbush
                     // 始点の隣ならそのセル、それ以降は手前のセルが覚えた最初の一歩を引き継ぐ。
                     first[next] = distances[current] == 0 ? next : first[current];
 
-                    // 未観測セルは経路の終点にだけ使い、その先を推測して探索を広げない。
-                    if (observed[next]) queue[tail++] = next;
+                    // 実測・回転推定の接続は展開する。完全未知のセルは終点にだけ使う。
+                    if (known[next]) queue[tail++] = next;
                 }
             }
         }
@@ -228,7 +233,7 @@ namespace AriadneEntranceAmbush
         {
             nextStep = chosenExit = -1;
             int nearest = ClosestExit(shortest);
-            if (nearest < 0 || start < 0 || start >= Size || !observed[start] || shortest[nearest] == 0) return false;
+            if (nearest < 0 || start < 0 || start >= Size || !known[start] || shortest[nearest] == 0) return false;
             int stepLimit = shortest[nearest] + 6;
             // 各セルに最小コストの候補を1つ保持する近似探索。
             // 歩数制約下のあらゆる経路を保持する方式ではなく、候補がなければ最短帰還に戻す。
@@ -269,7 +274,7 @@ namespace AriadneEntranceAmbush
         private int KnownNeighbor(int current, int direction)
         {
             int next = Neighbor(current, direction);
-            return next >= 0 && observed[next]
+            return next >= 0 && known[next]
                 && (openings[next] & (1 << ((direction + 2) % 4))) != 0 ? next : -1;
         }
 

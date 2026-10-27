@@ -1,44 +1,45 @@
-# SuperDungeonWars — 回収AIと独立待ち伏せAI
+# SuperDungeonWars — 回収AI・独立待ち伏せAI・共通地形推定
 
-正式受付番号 **0004838** の回収AIと、別の実験用待ち伏せAIを保存する。2026年10月23〜26日の4日計画は完了済み。10月27日の依頼で待ち伏せ版を通常AIから分離した。
+正式受付番号 **0004838** の回収AIと、別の実験用待ち伏せAI。4日計画は完了済み。その後の依頼で待ち伏せ版を分離し、2026年10月28日は入口待機の修正と、任意のAIから使える回転対称地形推定を追加した。
 
-## どちらを使うか
+## 使うAIと必要ファイル
 
-| AI | フォルダー | 内容 |
+| AI | フォルダー | 必要なC# |
 |---|---|---|
-| 通常のAriadne | [Party0004838](Assets/Participants/Party0004838) | C#4本。追加強化3の回収型へ戻した。中央の金宝箱へ1人を優先し、ほかは近場回収・探索等 |
-| 独立した待ち伏せ版 | [AriadneEntranceAmbush](Assets/Participants/AriadneEntranceAmbush/README.md) | C#5本。1人が回収、3人が同じ敵入口を守る。切り替えは初期OFF |
+| 通常のAriadne | [Party0004838](Assets/Participants/Party0004838) | 自身の4本＋共通1本。中央の金宝箱へ1人、ほかは近場回収・探索等 |
+| 独立待ち伏せ版 | [AriadneEntranceAmbush](Assets/Participants/AriadneEntranceAmbush/README.md) | 自身の5本＋共通1本。1人が回収、3人が同じ敵入口を守る |
+| 他のAIでも使える地形推定 | [Common](Assets/Participants/Common/README.md) | C4SymmetricMap.csの1本。Ariadneの型には依存しない |
 
-通常AIへ待ち伏せ用の設定を混ぜない。別のParty・Character用Prefabとして登録して選ぶ。補助クラスはアタッチ不要。
+両AIを同じプロジェクトへ置く場合は共通クラスを1回だけ配置する。補助クラスのアタッチは不要。各Partyの観測・推定インスタンスは共有しない。
 
-## 通常AIの導入
+## 導入
 
-配布済みのUnityプロジェクトへ追加するAIスクリプトであり、ゲーム本体・Prefab・外部アセットはこのGitには含めない。この環境の確認用Unityは6000.3.27f1。
+配布済みのUnityプロジェクトへ追加するスクリプト。ゲーム本体・Prefab・meta・外部アセットはGitに含めない。今回の確認用Unityは6000.3.27f1。
 
-1. `Assets/Participants/Party0004838/` のPrefabがなければ、配布版の **プロバト → 挑戦者作成** から番号0004838で生成する。
-2. 同フォルダーの `Party0004838Party.cs`、`Party0004838Character.cs`、`AriadneMap.cs`、`AriadneTactics.cs` の4本を置く。既存のmetaは維持する。通常AIに旧版のAriadneAmbush.csは不要。
-3. Party用PrefabのMember Prefabsを、このCharacterのPrefabへ設定する。BattlePartyRegistryへParty用Prefabを登録する。
-4. `Assets/Dungeon/Scenes/MazeExplore.unity` を開いてPlayし、チーム紹介からEnterまたはSpaceで進める。
+1. 通常版は `Assets/Participants/Party0004838/` のC#4本、待ち伏せ版は `Assets/Participants/AriadneEntranceAmbush/` のC#5本を使用する。通常版のPrefabがなければ **プロバト → 挑戦者作成** から0004838で生成する。既存metaは維持する。
+2. **Assets/Participants/Common/C4SymmetricMap.csも必要。** 両版で1本を共有する。
+3. Party用PrefabのMember Prefabsを対応するCharacterのPrefabへ指定し、BattlePartyRegistryへPartyのPrefabを登録する。待ち伏せ版のPrefab作成は [別AIの説明](Assets/Participants/AriadneEntranceAmbush/README.md)。
+4. `Assets/Dungeon/Scenes/MazeExplore.unity` を開き、Playから紹介・カウントダウンへ進む。
 
-ローカルの既存Registryは通常の回収型を使う。待ち伏せ版の導入・設定は [別AIのREADME](Assets/Participants/AriadneEntranceAmbush/README.md) を参照。ローカルに用意した `AriadneEntranceAmbushRegistry.asset` をControllerのBattle Party Registryへ指定すると待ち伏せ版になる。
+このローカル環境は、シーンのControllerが `AriadneEntranceAmbushRegistry.asset` を参照するよう変更済み。待ち伏せPrefabの一時回収はOFF。開いているUnityがPlay中なら停止して再生し直す。通常版へ戻す場合はControllerのBattle Party Registryを元の `BattlePartyRegistry.asset` へ変更する。両Registryの内容は別に保持している。
 
-## 入口で待っていなかった件
+## 入口で待機しない件
 
-前回の追加強化4は実行確認をしていなかった。旧版は入口への経路が未知なら探索を続け、到着後も初期設定では8秒で一時回収へ出る作りだった。今回、旧タイマーの8秒切り替えを限定確認したが、ユーザーの実際の場面を再現して原因を確定したわけではない。
+保存されたシーンが回収版を選んでいたこと、待ち伏せPrefabで一時回収がONだったことを確認し、ローカル設定を修正した。ON/OFF機能は残す。OFFでも迎撃・奪取・搬出では配置を離れる。
 
-独立版では**待機継続を初期設定**とし、同じ敵入口の1〜3マス内側に3人を配置する。`敵が来ない時に近場回収へ切り替える` をONにした時だけ8秒待機→8秒近場回収・探索→配置へ帰還する。OFFでも迎撃・奪取・搬出では配置を離れる。
+押し戻しの確認では、論理セルだけが配置セルのままで実座標が隣セルにずれるケースを再現した。修正版は、公開された進入方向へ少し入った点を待機位置とし、押された後はその位置へ戻って停止する。迎撃範囲も入口そのものを中心とする2マス以内へ狭めた。ユーザーの実際の試合が同じ原因だったとは断定していない。
 
-実行中のPartyの `現在の担当` に経路探索中・移動中・待機中等を表示する。未観測の経路は開拓が必要で、120秒以内の配置完了は未確認。
+## 地形の共通クラス
+
+`C4SymmetricMap` は公開KnownMapViewを受け取り、観測した地形を90度ずつ回転して推定する。実測と推定を区別し、矛盾を観測したら全推定を破棄する。中央の行・列も処理する。部屋ID・敵・宝箱の現在位置は回転コピーしない。
+
+両AIには接続済み。他のAIはこの1本を置き、`Refresh` と `TryGetNextStep` 等を呼べば利用できる。[組み込み例・API・前提](Assets/Participants/Common/README.md)。地形が推定できても宝を調べたことにはならないため、未訪問・未観測の探索は残す。
 
 ## 今回の確認範囲
 
-隔離した最小Unityプロジェクトでコンパイルと12項目の命令・タイマー確認を通過。全4方向から既知経路で3人を配置し、到着後100判断の停止命令を確認した。**確認用の移動実装を使っており、実際の物理挙動・衝突・戦闘を含む対戦比較は行っていない。強さの改善は未測定。** 詳しくは [変更点と確認の限界](AIExperiments/Ariadne/AMBUSH1_CHANGES.md)。
-
-## 四分の一からの地形推定
-
-ユーザーの指摘どおり、配布版の生成処理は90度回転の対称構造を持つ。生成した4マップの全セルで開口・部屋・中央ホールの回転一致を確認した。中央の縦横の列を除いた一区画だけでは、その行・列の情報は含まれない。敵や宝箱の現在位置も地形とは別。
-
-今回のAIには回転推定を追加していない。参加者AIは引き続き公開SXG APIと観測を使用し、非公開の生成マップ・シードは取得しない。
+- コンパイルと共通クラスの12項目を確認。4生成マップで一区画＋境界の441セルから残り1240セルを推定し、全地形の一致と、別入口への経路が実際の壁を横切らないことを確認した。
+- 実際のExplorerAgent・物理衝突・視界・命令適用を使った1マップ×4開始方向で、3人が入口へ到着。押し戻し後も戻り、実座標が配置セル内で3人同時に12秒以上停止することを確認した。
+- 敵・宝箱・戦闘・得点処理のない隔離条件。対戦比較・得点や勝率の測定はしていない。検証環境のUnityEditor.Searchの検索インデックス例外1件もログに保存した。詳細は [今回の記録と限界](AIExperiments/Ariadne/C4_HOLD_CHANGES.md)。
 
 ## 日別の保存版
 
@@ -51,8 +52,8 @@
 | 追加強化2・2026-10-26 | [追加実装の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-upgrade2/SuperDungeonWars) | 近場回収の先行割当・長い回収の人数制限。[変更点・入口のルール](AIExperiments/Ariadne/UPGRADE2_CHANGES.md) |
 | 追加強化3・2026-10-26 | [追加実装の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-upgrade3/SuperDungeonWars) | 中央の金宝箱へ専任1人、道中の通常宝箱を選別。[変更点・解除条件](AIExperiments/Ariadne/UPGRADE3_CHANGES.md) |
 | 追加強化4・2026-10-27 | [追加実装の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-upgrade4/SuperDungeonWars) | 入口待ち伏せ3人と回収1人、空振り時の切り替えON/OFF。[設定と未測定事項](AIExperiments/Ariadne/UPGRADE4_CHANGES.md) |
-
 | 独立待ち伏せ版・2026-10-27 | [分離後の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-ambush1/SuperDungeonWars) | 通常AIと分離、3人を1入口へ配置、待機を初期設定に変更。[確認範囲と変更点](AIExperiments/Ariadne/AMBUSH1_CHANGES.md) |
+| 共通C4・待機修正・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-c4-hold/SuperDungeonWars) | 共通地形推定を両AIへ接続、入口の実座標維持。[変更点と確認範囲](AIExperiments/Ariadne/C4_HOLD_CHANGES.md) |
 
 過去のタグと記録は固定のまま残す。2・3日目は当時の仮番号Party1111111、4日目以降は正式番号0004838。
 
@@ -66,11 +67,11 @@
 
 ## 提出用ZIPと公開範囲
 
-以前の提出前検査を通過したZIPは4日目固定版のまま。今回の回収型・独立待ち伏せ版の提出ZIPとして案内しない。独立待ち伏せ版は実験用の型名で、正式提出用の検査は未実施。
+以前の検査済みZIPは4日目固定版のまま。今回の版の提出ZIPとしては案内しない。共通クラスは通常の参加者フォルダー外にあるため、番号ごとのZIPへ含める準備と再コンパイル・提出前検査が必要。同じプロジェクトで型を重複コピーしない。独立待ち伏せ版は実験用型名で、正式提出用の検査も未実施。
 
-公開するのはAIのC#と直接付随するMarkdown、別依頼で許可されたToolsのC#と説明だけ。Prefab・meta・Registry・ゲーム設定・評価用Editorコード・生データ・ログ・ZIP・外部アセットは追加しない。
+公開するのはAI C#と直接付随するMarkdown、別依頼で許可されたToolsのC#と説明だけ。今回変更したローカルのシーン参照・Prefab設定、meta・Registry・確認用コード・DLL・生データ・ログ・ZIPは追加しない。
 
-## 4日目までの実測結果（今回の待ち伏せ版の成績ではない）
+## 4日目までの実測結果（今回の修正・共通地形推定の成績ではない）
 
 同じ2マップ×上下2位置の4試合でAriadneは1位2回、平均432.75点。比較対象TreasureReturnは1位1回、平均401.5点。全8試合の実行エラーは0件だった。
 

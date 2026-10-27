@@ -1,10 +1,11 @@
 using UnityEngine;
+using SuperDungeonWars.AI;
 
 namespace AriadneEntranceAmbush
 {
     /// <summary>
     /// 独立待ち伏せ版（2026-10-27）。同じ敵入口へ3人を配置し、待機と一時回収を管理する。
-    /// 公開マップの寸法と自分の出発口だけを使う補助クラス。アタッチは不要。
+    /// 公開観測・その回転推定と自分の出発口を使う補助クラス。アタッチは不要。
     /// </summary>
     internal sealed class AriadneAmbush
     {
@@ -57,13 +58,13 @@ namespace AriadneEntranceAmbush
         internal bool IsAmbusher(int member) => entranceByMember[member] >= 0;
         internal Vector2Int TargetEntrance => entrances[targetEntrance];
 
-        internal Vector2Int Post(int member, KnownMapView map)
+        internal Vector2Int Post(int member, C4SymmetricMap map)
         {
             Vector2Int exit = entrances[entranceByMember[member]];
             Vector2Int inward = exit.y == map.Height - 1 ? Vector2Int.down : exit.y == 0 ? Vector2Int.up
                 : exit.x == map.Width - 1 ? Vector2Int.left : Vector2Int.right;
             // 入口から1・2・3マス内側へずらして構え、全員が同一点へ重なるのを抑える。
-            // 開口を観測した範囲だけ進め、曲がり角や未知の通路へは配置を延ばさない。
+            // 観測または回転推定で開口がつながる範囲だけ進め、完全未知の通路へは配置を延ばさない。
             Vector2Int post = exit;
             for (int step = 0; step < member && map.CanMove(post, post + inward); step++) post += inward;
             return post;

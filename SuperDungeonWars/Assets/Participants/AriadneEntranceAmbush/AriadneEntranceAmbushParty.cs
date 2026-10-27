@@ -6,7 +6,7 @@ namespace AriadneEntranceAmbush
     /// <summary>
     /// 独立待ち伏せ版（2026-10-27）。1つの敵入口へ3人を配置し、残る1人が回収する。
     /// 通常のParty0004838Partyとは別のParty・Character用Prefabとして選ぶ。
-    /// 判断材料は公開SXG APIで取得した観測情報だけで、未観測の迷路は参照しない。
+    /// 判断材料は公開観測とその回転推定。非公開の生成済み迷路やシードは参照しない。
     /// </summary>
     public sealed class AriadneEntranceAmbushParty : ComPartyBase
     {
@@ -33,6 +33,11 @@ namespace AriadneEntranceAmbush
         // 公開観測で敵の所持を確認したIDだけを、落とされた宝の識別へ使う。
         private readonly HashSet<int> enemyCarriedIds = new HashSet<int>();
         private int[] postDistances, postFirstSteps;
+        // 到着したときの公開実座標を保持する。セル番号だけで止めると、味方に押されてずれたままになる。
+        private Vector3[] holdPositions;
+        private Vector3[] entryDirections;
+        private int[] holdCells;
+        private bool[] returningToHold;
         // 自部隊の公開観測を個人AIへ伝える連絡帳。部隊終了時に登録を解除する。
         private readonly AriadneTactics tactics = new AriadneTactics();
         private PartyMemberInfo[] members;
@@ -97,10 +102,13 @@ namespace AriadneEntranceAmbush
                 m_memberStates = new string[count];
                 ambush = new AriadneAmbush(count, map.Width, map.Height);
                 postDistances = new int[graph.Size]; postFirstSteps = new int[graph.Size];
+                holdPositions = new Vector3[count]; holdCells = new int[count];
+                entryDirections = new Vector3[count]; returningToHold = new bool[count];
                 for (int i = 0; i < count; i++)
                 {
                     distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1; returnExits[i] = -1;
                     pickupIds[i] = -1;
+                    holdCells[i] = -1;
                 }
             }
             // 仲間の誰かが新しく観測した通路を取り込み、帰還距離も更新する。
@@ -108,7 +116,16 @@ namespace AriadneEntranceAmbush
             reserved.Clear();
             for (int i = 0; i < members.Length; i++)
             {
+                PartyMemberInfo previous = members[i];
                 SXG_TryGetMemberInfo(i, out members[i]);
+                // 公開された前後の座標から、配置セルへ進入した向きだけを覚える。
+                // 原点やCellToWorld等のゲーム内部情報を使わず、セル境界から少し内側へ構えるため。
+                if (previous != null && members[i] != null && previous.IsMoving && !previous.IsKnockedOut
+                    && !members[i].IsKnockedOut && previous.CurrentCell != members[i].CurrentCell)
+                {
+                    Vector3 entry = members[i].WorldPosition - previous.WorldPosition; entry.y = 0f;
+                    if (entry.sqrMagnitude > 0.0001f) entryDirections[i] = entry.normalized;
+                }
                 if (members[i] != null && !members[i].IsKnockedOut)
                     graph.RecordCentralVisit(graph.Index(members[i].CurrentCell));
                 // 搬出やKOで手ぶらになったら前回の出口への優遇も終了し、次の運搬へ引き継がない。
@@ -262,11 +279,15 @@ namespace AriadneEntranceAmbush
                     ambush.ResetMember(i);
                     continue;
                 }
-                int post = graph.Index(ambush.Post(i, map));
-                graph.Search(post, postDistances, postFirstSteps);
+                int post = graph.Index(ambush.Post(i, graph.Terrain));
+                // 迎撃・奪取の行動範囲は配置場所ではなく入口そのものを中心にする。
+                // 奥の配置＋追跡半径の合計で入口から離れすぎるのを防ぐ。
+                graph.Search(graph.Index(ambush.TargetEntrance), postDistances, postFirstSteps);
                 VisibleCharacterData carrier = FindAmbushCarrier(i, visible, out bool carrierNearPost);
                 // 「隣のセルにいる」では到着扱いにしない。配置セルで止まって初めて待機を計時する。
-                bool nearPost = !members[i].IsMoving && distances[i][post] == 0 && map.IsObserved(graph.Cell(post));
+                Vector3 holdDelta = holdPositions[i] - members[i].WorldPosition; holdDelta.y = 0f;
+                bool nearPost = !members[i].IsMoving && distances[i][post] == 0 && map.IsObserved(graph.Cell(post))
+                    && !returningToHold[i] && (holdCells[i] != post || holdDelta.sqrMagnitude <= 0.01f);
                 bool foraging = ambush.Update(i, nearPost, carrierNearPost, Time.time,
                     m_noCarrierWaitSeconds, m_nearbyCollectionSeconds);
 
@@ -284,7 +305,7 @@ namespace AriadneEntranceAmbush
                     assigned[i] = true; pickupIds[i] = -1; longJobs[i] = false;
                     int cell = graph.Index(carrier.CellPosition);
                     goals[i] = cell; reserved.Add(cell);
-                    m_memberStates[i] = "担当入口の可視運搬者を迎撃中（既知4マス以内）";
+                    m_memberStates[i] = "担当入口の可視運搬者を迎撃中（入口から2マス以内）";
                     // 見えている相手へ接近して向きも合わせる。同セルでは観測した実座標を使う。
                     if (cell == graph.Index(members[i].CurrentCell)) SXG_SetMemberMoveTargetWorld(i, carrier.WorldPosition);
                     else Move(i, cell);
@@ -310,7 +331,7 @@ namespace AriadneEntranceAmbush
             return true;
         }
 
-        /// <summary>配置場所から既知経路4歩、担当からも4歩以内の可視運搬者だけを迎撃する。</summary>
+        /// <summary>入口そのものから2マス、担当から3マス以内の可視運搬者だけを迎撃する。</summary>
         private VisibleCharacterData FindAmbushCarrier(int member, IReadOnlyList<VisibleCharacterData> visible, out bool nearPost)
         {
             nearPost = false;
@@ -321,10 +342,10 @@ namespace AriadneEntranceAmbush
             {
                 if (tactics.IsFriend(enemy.CharacterId) || enemy.IsKnockedOut || !enemy.HasTreasure) continue;
                 int cell = graph.Index(enemy.CellPosition);
-                if (cell < 0 || cell >= graph.Size || postDistances[cell] < 0 || postDistances[cell] > 4) continue;
+                if (cell < 0 || cell >= graph.Size || postDistances[cell] < 0 || postDistances[cell] > 2) continue;
                 nearPost = true;
                 int distance = distances[member][cell];
-                if (distance < 0 || distance > 4) continue;
+                if (distance < 0 || distance > 3) continue;
                 Vector3 delta = enemy.WorldPosition - members[member].WorldPosition; delta.y = 0f;
                 if (distance < bestDistance || (distance == bestDistance && delta.sqrMagnitude < bestWorldDistance))
                 { best = enemy; bestDistance = distance; bestWorldDistance = delta.sqrMagnitude; }
@@ -382,6 +403,8 @@ namespace AriadneEntranceAmbush
             if (distances[member][post] >= 0)
             {
                 goals[member] = post; reserved.Add(post);
+                if (distances[member][post] == 0)
+                { HoldAmbushPost(member, post); return; }
                 m_memberStates[member] = distances[member][post] == 0
                     ? $"入口で待機中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}"
                     : $"入口へ移動中: {ambush.TargetEntrance} / 残り既知{distances[member][post]}マス";
@@ -414,6 +437,34 @@ namespace AriadneEntranceAmbush
                 : $"入口への既知経路・探索先なし: {ambush.TargetEntrance}";
             if (target >= 0) { reserved.Add(target); Move(member, target); }
             else SXG_StopMember(member);
+        }
+
+        /// <summary>進入方向へ0.12単位入った待機点を作り、0.1単位以上押されたら0.06単位以内まで戻る。</summary>
+        private void HoldAmbushPost(int member, int post)
+        {
+            if (holdCells[member] != post)
+            {
+                holdCells[member] = post;
+                // セルへ入った瞬間の位置は境界に近い。0.12ワールド単位（間隔2なら0.06マス）だけ
+                // 観測した進入方向へ進め、戻るときの停止誤差で隣セルに残るのを避ける。
+                holdPositions[member] = members[member].WorldPosition + entryDirections[member] * 0.12f;
+                returningToHold[member] = true;
+            }
+            Vector3 delta = holdPositions[member] - members[member].WorldPosition; delta.y = 0f;
+            // 開始0.1・完了0.06ワールド単位の幅を分け、小さな物理揺れで往復しない。
+            // 一度戻り始めたら、開始幅に入っただけで早く停止しない。
+            if (delta.sqrMagnitude > 0.01f) returningToHold[member] = true;
+            if (delta.sqrMagnitude <= 0.0036f) returningToHold[member] = false;
+            if (returningToHold[member])
+            {
+                m_memberStates[member] = $"入口の待機位置へ戻り中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}";
+                SXG_SetMemberMoveTargetWorld(member, holdPositions[member]);
+            }
+            else
+            {
+                m_memberStates[member] = $"入口で待機中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}";
+                SXG_StopMember(member);
+            }
         }
 
         /// <summary>
