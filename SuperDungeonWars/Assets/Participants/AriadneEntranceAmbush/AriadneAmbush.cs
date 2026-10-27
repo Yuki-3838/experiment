@@ -4,7 +4,7 @@ using SuperDungeonWars.AI;
 namespace AriadneEntranceAmbush
 {
     /// <summary>
-    /// 独立待ち伏せ版（2026-10-27）。同じ敵入口へ3人を配置し、待機と一時回収を管理する。
+    /// 3入口分担版（2026-10-28）。自陣以外の各入口へ1人ずつ配置し、待機と一時回収を管理する。
     /// 公開観測・その回転推定と自分の出発口を使う補助クラス。アタッチは不要。
     /// </summary>
     internal sealed class AriadneAmbush
@@ -13,7 +13,6 @@ namespace AriadneEntranceAmbush
         private readonly int[] entranceByMember;
         private readonly float[] quietSince, forageUntil;
         private int home = -1;
-        private int targetEntrance = -1;
         private bool fallbackEnabled;
 
         internal AriadneAmbush(int count, int width, int height)
@@ -25,7 +24,7 @@ namespace AriadneEntranceAmbush
             for (int i = 0; i < count; i++) { entranceByMember[i] = -1; quietSince[i] = -1f; }
         }
 
-        internal bool ConfigureHome(Vector2Int ownEntrance, int[] knownDistances, int width)
+        internal bool ConfigureHome(Vector2Int ownEntrance)
         {
             int own = -1;
             for (int i = 0; i < entrances.Length; i++) if (entrances[i] == ownEntrance) own = i;
@@ -33,41 +32,26 @@ namespace AriadneEntranceAmbush
             if (home == own) return true;
             home = own;
             for (int i = 0; i < entranceByMember.Length; i++) entranceByMember[i] = -1;
-            // 経路が既知の敵入口があれば最短を選ぶ。未知なら座標上で近い入口を目標にする。
-            // 座標差は誘導用であり、壁の向こうへ直進できるという意味ではない。
-            int bestKnown = int.MaxValue, bestEstimate = int.MaxValue;
-            targetEntrance = -1;
-            for (int i = 0; i < entrances.Length; i++)
-            {
-                if (i == own) continue;
-                Vector2Int exit = entrances[i];
-                int d = knownDistances[exit.y * width + exit.x];
-                int estimate = Mathf.Abs(exit.x - ownEntrance.x) + Mathf.Abs(exit.y - ownEntrance.y);
-                if (d >= 0 && d < bestKnown)
-                { bestKnown = d; targetEntrance = i; }
-                else if (bestKnown == int.MaxValue && estimate < bestEstimate)
-                { bestEstimate = estimate; targetEntrance = i; }
-            }
-            // メンバー0は回収専任。1〜3は同じ敵入口を守り、別の入口へ分散しない。
-            for (int member = 1; member < entranceByMember.Length; member++)
-                entranceByMember[member] = targetEntrance;
+            // 入口は北・東・南・西の時計回り。自陣から1・2・3つ先を別々の担当へ固定する。
+            // メンバー0は回収専任とし、残る3人で自陣以外の3入口を重複なくカバーする。
+            // 距離の近い1入口へ全員を集めたり、毎回担当を入れ替えたりしない。
+            for (int member = 1; member < entranceByMember.Length && member < entrances.Length; member++)
+                entranceByMember[member] = (own + member) % entrances.Length;
             ResetTimers();
             return true;
         }
 
         internal bool IsAmbusher(int member) => entranceByMember[member] >= 0;
-        internal Vector2Int TargetEntrance => entrances[targetEntrance];
+        internal Vector2Int TargetEntrance(int member) => entrances[entranceByMember[member]];
 
         internal Vector2Int Post(int member, C4SymmetricMap map)
         {
             Vector2Int exit = entrances[entranceByMember[member]];
             Vector2Int inward = exit.y == map.Height - 1 ? Vector2Int.down : exit.y == 0 ? Vector2Int.up
                 : exit.x == map.Width - 1 ? Vector2Int.left : Vector2Int.right;
-            // 入口から1・2・3マス内側へずらして構え、全員が同一点へ重なるのを抑える。
-            // 観測または回転推定で開口がつながる範囲だけ進め、完全未知の通路へは配置を延ばさない。
-            Vector2Int post = exit;
-            for (int step = 0; step < member && map.CanMove(post, post + inward); step++) post += inward;
-            return post;
+            // 各入口を1人で守るので、全員がそれぞれの入口から1マス内側で構える。
+            // 観測・回転推定で接続が分かる場合だけ内側を使い、完全未知なら入口を目指す。
+            return map.CanMove(exit, exit + inward) ? exit + inward : exit;
         }
 
         internal void SetFallbackEnabled(bool enabled)

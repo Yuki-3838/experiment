@@ -4,7 +4,7 @@ using UnityEngine;
 namespace AriadneEntranceAmbush
 {
     /// <summary>
-    /// 独立待ち伏せ版（2026-10-27）。1つの敵入口へ3人を配置し、残る1人が回収する。
+    /// 3入口分担版（2026-10-28）。自陣以外の3入口を1人ずつ守り、残る1人が回収する。
     /// 通常のParty0004838Partyとは別のParty・Character用Prefabとして選ぶ。
     /// 判断材料は公開観測とその回転推定。非公開の生成済み迷路やシードは参照しない。
     /// </summary>
@@ -251,9 +251,7 @@ namespace AriadneEntranceAmbush
         private bool AssignEntranceAmbush(KnownMapView map, IReadOnlyList<VisibleCharacterData> visible, ref int collectors)
         {
             bool hasHome = SXG_TryGetReturnEntranceCell(out Vector2Int home);
-            // 回収担当がKO・ロック中でも、未更新の距離配列で入口を選ばない。
-            if (hasHome) graph.Search(graph.Index(home), postDistances, postFirstSteps);
-            if (!hasHome || !ambush.ConfigureHome(home, postDistances, map.Width))
+            if (!hasHome || !ambush.ConfigureHome(home))
             {
                 ambush.ResetTimers();
                 // 入口情報を取得できない場合も3人を通常探索へ流さず、原因を表示して待つ。
@@ -282,7 +280,7 @@ namespace AriadneEntranceAmbush
                 int post = graph.Index(ambush.Post(i, graph.Terrain));
                 // 迎撃・奪取の行動範囲は配置場所ではなく入口そのものを中心にする。
                 // 奥の配置＋追跡半径の合計で入口から離れすぎるのを防ぐ。
-                graph.Search(graph.Index(ambush.TargetEntrance), postDistances, postFirstSteps);
+                graph.Search(graph.Index(ambush.TargetEntrance(i)), postDistances, postFirstSteps);
                 VisibleCharacterData carrier = FindAmbushCarrier(i, visible, out bool carrierNearPost);
                 // 「隣のセルにいる」では到着扱いにしない。配置セルで止まって初めて待機を計時する。
                 Vector3 holdDelta = holdPositions[i] - members[i].WorldPosition; holdDelta.y = 0f;
@@ -406,8 +404,8 @@ namespace AriadneEntranceAmbush
                 if (distances[member][post] == 0)
                 { HoldAmbushPost(member, post); return; }
                 m_memberStates[member] = distances[member][post] == 0
-                    ? $"入口で待機中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}"
-                    : $"入口へ移動中: {ambush.TargetEntrance} / 残り既知{distances[member][post]}マス";
+                    ? $"入口で待機中: {ambush.TargetEntrance(member)} / 配置 {graph.Cell(post)}"
+                    : $"入口へ移動中: {ambush.TargetEntrance(member)} / 残り既知{distances[member][post]}マス";
                 Move(member, post);
                 return;
             }
@@ -416,7 +414,7 @@ namespace AriadneEntranceAmbush
             if (previous >= 0 && graph.Frontiers.Contains(previous) && distances[member][previous] > 0)
             {
                 goals[member] = previous; reserved.Add(previous);
-                m_memberStates[member] = $"入口への経路を探索中: {ambush.TargetEntrance} / 開拓 {graph.Cell(previous)}";
+                m_memberStates[member] = $"入口への経路を探索中: {ambush.TargetEntrance(member)} / 開拓 {graph.Cell(previous)}";
                 Move(member, previous);
                 return;
             }
@@ -433,8 +431,8 @@ namespace AriadneEntranceAmbush
             }
             goals[member] = target;
             m_memberStates[member] = target >= 0
-                ? $"入口への経路を探索中: {ambush.TargetEntrance} / 開拓 {graph.Cell(target)}"
-                : $"入口への既知経路・探索先なし: {ambush.TargetEntrance}";
+                ? $"入口への経路を探索中: {ambush.TargetEntrance(member)} / 開拓 {graph.Cell(target)}"
+                : $"入口への既知経路・探索先なし: {ambush.TargetEntrance(member)}";
             if (target >= 0) { reserved.Add(target); Move(member, target); }
             else SXG_StopMember(member);
         }
@@ -457,12 +455,12 @@ namespace AriadneEntranceAmbush
             if (delta.sqrMagnitude <= 0.0036f) returningToHold[member] = false;
             if (returningToHold[member])
             {
-                m_memberStates[member] = $"入口の待機位置へ戻り中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}";
+                m_memberStates[member] = $"入口の待機位置へ戻り中: {ambush.TargetEntrance(member)} / 配置 {graph.Cell(post)}";
                 SXG_SetMemberMoveTargetWorld(member, holdPositions[member]);
             }
             else
             {
-                m_memberStates[member] = $"入口で待機中: {ambush.TargetEntrance} / 配置 {graph.Cell(post)}";
+                m_memberStates[member] = $"入口で待機中: {ambush.TargetEntrance(member)} / 配置 {graph.Cell(post)}";
                 SXG_StopMember(member);
             }
         }

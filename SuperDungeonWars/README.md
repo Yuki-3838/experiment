@@ -7,7 +7,7 @@
 | AI | フォルダー | 必要なC# |
 |---|---|---|
 | 通常のAriadne | [Party0004838](Assets/Participants/Party0004838) | 自身の4本＋共通1本。中央の金宝箱へ1人、ほかは近場回収・探索等 |
-| 独立待ち伏せ版 | [AriadneEntranceAmbush](Assets/Participants/AriadneEntranceAmbush/README.md) | 自身の5本＋共通1本。1人が回収、3人が同じ敵入口を守る |
+| 独立待ち伏せ版 | [AriadneEntranceAmbush](Assets/Participants/AriadneEntranceAmbush/README.md) | 自身の5本＋共通1本。1人が回収、自陣以外の3入口を1人ずつ守る |
 | 他のAIでも使える地形推定 | [Common](Assets/Participants/Common/README.md) | C4SymmetricMap.csの1本。Ariadneの型には依存しない |
 
 両AIを同じプロジェクトへ置く場合は共通クラスを1回だけ配置する。補助クラスのアタッチは不要。各Partyの観測・推定インスタンスは共有しない。
@@ -23,7 +23,13 @@
 
 このローカル環境は、シーンのControllerが `AriadneEntranceAmbushRegistry.asset` を参照するよう変更済み。待ち伏せPrefabの一時回収はOFF。開いているUnityがPlay中なら停止して再生し直す。通常版へ戻す場合はControllerのBattle Party Registryを元の `BattlePartyRegistry.asset` へ変更する。両Registryの内容は別に保持している。
 
-## 入口で待機しない件
+## 現在の待ち伏せ配置：3入口へ1人ずつ
+
+前版は1入口へ3人を集中する設定だった。最新の指摘に合わせ、メンバー0を回収、1〜3を自陣以外の3入口へ1人ずつ固定配置する。各自の入口から1マス内側で待ち、迎撃・回収範囲と状態表示も担当ごとに決める。[分担配置の変更点](AIExperiments/Ariadne/AMBUSH_SPREAD_CHANGES.md)。
+
+今回の分担配置は隔離プロジェクトでコンパイルのみ確認。再生・物理待機・対戦比較は未実施。以下の物理確認は前版の1入口集中配置の記録であり、分担配置の動作確認として扱わない。
+
+## 入口待機に関する前回の修正
 
 保存されたシーンが回収版を選んでいたこと、待ち伏せPrefabで一時回収がONだったことを確認し、ローカル設定を修正した。ON/OFF機能は残す。OFFでも迎撃・奪取・搬出では配置を離れる。
 
@@ -35,10 +41,10 @@
 
 両AIには接続済み。他のAIはこの1本を置き、`Refresh` と `TryGetNextStep` 等を呼べば利用できる。[組み込み例・API・前提](Assets/Participants/Common/README.md)。地形が推定できても宝を調べたことにはならないため、未訪問・未観測の探索は残す。
 
-## 今回の確認範囲
+## 共通地形クラスと前版の確認範囲
 
 - コンパイルと共通クラスの12項目を確認。4生成マップで一区画＋境界の441セルから残り1240セルを推定し、全地形の一致と、別入口への経路が実際の壁を横切らないことを確認した。
-- 実際のExplorerAgent・物理衝突・視界・命令適用を使った1マップ×4開始方向で、3人が入口へ到着。押し戻し後も戻り、実座標が配置セル内で3人同時に12秒以上停止することを確認した。
+- 前版の1入口集中配置では、実際のExplorerAgent・物理衝突・視界・命令適用を使った1マップ×4開始方向で、3人が入口へ到着。押し戻し後も戻り、実座標が配置セル内で3人同時に12秒以上停止することを確認した。
 - 敵・宝箱・戦闘・得点処理のない隔離条件。対戦比較・得点や勝率の測定はしていない。検証環境のUnityEditor.Searchの検索インデックス例外1件もログに保存した。詳細は [今回の記録と限界](AIExperiments/Ariadne/C4_HOLD_CHANGES.md)。
 
 ## 日別の保存版
@@ -54,6 +60,7 @@
 | 追加強化4・2026-10-27 | [追加実装の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-upgrade4/SuperDungeonWars) | 入口待ち伏せ3人と回収1人、空振り時の切り替えON/OFF。[設定と未測定事項](AIExperiments/Ariadne/UPGRADE4_CHANGES.md) |
 | 独立待ち伏せ版・2026-10-27 | [分離後の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-ambush1/SuperDungeonWars) | 通常AIと分離、3人を1入口へ配置、待機を初期設定に変更。[確認範囲と変更点](AIExperiments/Ariadne/AMBUSH1_CHANGES.md) |
 | 共通C4・待機修正・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-c4-hold/SuperDungeonWars) | 共通地形推定を両AIへ接続、入口の実座標維持。[変更点と確認範囲](AIExperiments/Ariadne/C4_HOLD_CHANGES.md) |
+| 3入口分担・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-ambush-spread/SuperDungeonWars) | 入口を担当ごとに分離。[変更点](AIExperiments/Ariadne/AMBUSH_SPREAD_CHANGES.md) |
 
 過去のタグと記録は固定のまま残す。2・3日目は当時の仮番号Party1111111、4日目以降は正式番号0004838。
 
