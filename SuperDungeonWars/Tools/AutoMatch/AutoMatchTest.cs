@@ -453,7 +453,6 @@ public sealed class AutoMatchTest : MonoBehaviour
     {
         foreach (MonoBehaviour tool in FindAll<MonoBehaviour>())
             if (tool != null && tool.enabled && (HasTypeName(tool.GetType(), "GameDebugController")
-                || HasTypeName(tool.GetType(), "GameSpeedDebugController")
                 || HasTypeName(tool.GetType(), "BattleResultFastForwardController")))
             {
                 m_suspendedTools.Add(tool);

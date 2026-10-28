@@ -161,7 +161,6 @@ public sealed class GameDebugController : MonoBehaviour
             return;
         }
         s_instance = this;
-        RemoveLegacyControllers();
         m_initialTimeScale = m_currentGameSpeed = Time.timeScale;
         m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
         // The same object and its fields survive for the whole Play session.
@@ -170,15 +169,6 @@ public sealed class GameDebugController : MonoBehaviour
             gameObject.name = nameof(GameDebugController);
             DontDestroyOnLoad(gameObject);
         }
-    }
-
-    private void Start()
-    {
-        // Legacy startup callbacks may run after ours. Finish migration before
-        // the first Update, after every runtime startup callback has completed.
-        RemoveLegacyControllers();
-        Time.timeScale = m_currentGameSpeed;
-        RefreshResultTimings();
     }
 
     private void OnEnable()
@@ -296,7 +286,6 @@ public sealed class GameDebugController : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        RemoveLegacyControllers();
         Time.timeScale = m_currentGameSpeed;
         m_restoreSpeedAfterSceneStart = true;
         RefreshResultTimings();
@@ -315,29 +304,8 @@ public sealed class GameDebugController : MonoBehaviour
 
     private bool IsDedicatedDebugObject()
     {
-        if (transform.parent != null || transform.childCount != 0) return false;
-        foreach (Component component in GetComponents<Component>())
-        {
-            if (component == this || component is Transform) continue;
-            // A legacy component awaiting Destroy must not prevent the new
-            // controller on the same otherwise-empty host from persisting.
-            if (component is MonoBehaviour && component.GetType().Name == "GameSpeedDebugController") continue;
-            return false;
-        }
-        return true;
-    }
-
-    private static void RemoveLegacyControllers()
-    {
-#if UNITY_2022_2_OR_NEWER
-        MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
-            FindObjectsInactive.Include, FindObjectsSortMode.None);
-#else
-        MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>(true);
-#endif
-        foreach (MonoBehaviour behaviour in behaviours)
-            if (behaviour != null && behaviour.GetType().Name == "GameSpeedDebugController")
-                DiscardController(behaviour);
+        return transform.parent == null && transform.childCount == 0
+            && GetComponents<Component>().Length == 2;
     }
 
     private static void DiscardController(MonoBehaviour controller)
