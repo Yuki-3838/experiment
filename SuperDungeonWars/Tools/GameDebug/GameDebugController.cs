@@ -15,7 +15,7 @@ using UnityEditor;
 /// </summary>
 [DefaultExecutionOrder(-10000)]
 [DisallowMultipleComponent]
-public sealed class GameSpeedDebugController : MonoBehaviour
+public sealed class GameDebugController : MonoBehaviour
 {
     public enum ResultClock
     {
@@ -33,7 +33,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     }
 
     [SerializeField]
-    private CameraTeam m_cameraTeam;
+    private CameraTeam m_cameraTeam = CameraTeam.Red;
 
     [SerializeField]
     private bool m_followGameSpeed = true;
@@ -47,24 +47,29 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     [SerializeField]
     private ResultClock m_resultClock = ResultClock.Automatic;
 
+    private static GameDebugController s_instance;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetInstance() { s_instance = null; }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void CreateDebugControllerOnce()
+    private static void CreateOnce()
     {
         // This callback runs once at startup, not on subsequent scene loads.
         // Keep debug objects out of gameplay scenes so loops create no copies.
 #if UNITY_2022_2_OR_NEWER
-        GameSpeedDebugController[] existing =
-            UnityEngine.Object.FindObjectsByType<GameSpeedDebugController>(
+        GameDebugController[] existing =
+            UnityEngine.Object.FindObjectsByType<GameDebugController>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
 #else
-        GameSpeedDebugController[] existing =
-            UnityEngine.Object.FindObjectsOfType<GameSpeedDebugController>(true);
+        GameDebugController[] existing =
+            UnityEngine.Object.FindObjectsOfType<GameDebugController>(true);
 #endif
         // Respect a manually attached controller, including a disabled one.
         if (existing.Length != 0) return;
-        new GameObject(nameof(GameSpeedDebugController))
-            .AddComponent<GameSpeedDebugController>();
+        new GameObject(nameof(GameDebugController))
+            .AddComponent<GameDebugController>();
     }
 #endif
 
@@ -95,9 +100,10 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     private bool m_isControlling;
     private readonly CameraFocusBridge m_debugCamera = new CameraFocusBridge();
     private bool m_restoreSpeedAfterSceneStart;
-    private bool m_cameraFocusRequested, m_waitingForCamera;
-    private CameraTeam m_focusedCameraTeam;
-    private int m_focusedCameraMember;
+    private bool m_cameraFocusRequested = true;
+    private bool m_waitingForCamera;
+    private CameraTeam m_focusedCameraTeam = CameraTeam.Red;
+    private int m_focusedCameraMember = 1;
 
     public float ResultSpeed { get { return m_resultSpeed; } }
     public int ResultTargetCount { get { return m_knownTargets.Count; } }
@@ -149,15 +155,41 @@ public sealed class GameSpeedDebugController : MonoBehaviour
     private void Awake()
     {
         if (!Application.isPlaying) return;
+        if (s_instance != null && s_instance != this)
+        {
+            DiscardController(this);
+            return;
+        }
+        s_instance = this;
+        RemoveLegacyControllers();
         m_initialTimeScale = m_currentGameSpeed = Time.timeScale;
         m_lastPositiveTimeScale = Time.timeScale > 0.0f ? Time.timeScale : 1.0f;
         // The same object and its fields survive for the whole Play session.
-        if (IsDedicatedDebugObject()) DontDestroyOnLoad(gameObject);
+        if (IsDedicatedDebugObject())
+        {
+            gameObject.name = nameof(GameDebugController);
+            DontDestroyOnLoad(gameObject);
+        }
+    }
+
+    private void Start()
+    {
+        // Legacy startup callbacks may run after ours. Finish migration before
+        // the first Update, after every runtime startup callback has completed.
+        RemoveLegacyControllers();
+        Time.timeScale = m_currentGameSpeed;
+        RefreshResultTimings();
     }
 
     private void OnEnable()
     {
         if (!Application.isPlaying) return;
+        if (s_instance == null) s_instance = this;
+        if (s_instance != this)
+        {
+            DiscardController(this);
+            return;
+        }
         Time.timeScale = m_currentGameSpeed;
         m_restoreSpeedAfterSceneStart = true;
         m_isControlling = true;
@@ -264,6 +296,7 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        RemoveLegacyControllers();
         Time.timeScale = m_currentGameSpeed;
         m_restoreSpeedAfterSceneStart = true;
         RefreshResultTimings();
@@ -282,8 +315,41 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 
     private bool IsDedicatedDebugObject()
     {
-        return transform.parent == null && transform.childCount == 0
-            && GetComponents<Component>().Length == 2;
+        if (transform.parent != null || transform.childCount != 0) return false;
+        foreach (Component component in GetComponents<Component>())
+        {
+            if (component == this || component is Transform) continue;
+            // A legacy component awaiting Destroy must not prevent the new
+            // controller on the same otherwise-empty host from persisting.
+            if (component is MonoBehaviour && component.GetType().Name == "GameSpeedDebugController") continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static void RemoveLegacyControllers()
+    {
+#if UNITY_2022_2_OR_NEWER
+        MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
+            FindObjectsInactive.Include, FindObjectsSortMode.None);
+#else
+        MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsOfType<MonoBehaviour>(true);
+#endif
+        foreach (MonoBehaviour behaviour in behaviours)
+            if (behaviour != null && behaviour.GetType().Name == "GameSpeedDebugController")
+                DiscardController(behaviour);
+    }
+
+    private static void DiscardController(MonoBehaviour controller)
+    {
+        GameObject host = controller.gameObject;
+        bool dedicated = host.transform.parent == null && host.transform.childCount == 0
+            && host.GetComponents<Component>().Length == 2;
+        // Disable before Destroy so a duplicate never runs LateUpdate or resets
+        // the live controller's clock when its destruction is deferred.
+        controller.enabled = false;
+        if (dedicated) Destroy(host);
+        else Destroy(controller);
     }
 
     private void DiscoverSceneTargets()
@@ -442,6 +508,11 @@ public sealed class GameSpeedDebugController : MonoBehaviour
         m_resultRoots.Clear();
         m_clockCache.Clear();
         m_isControlling = false;
+    }
+
+    private void OnDestroy()
+    {
+        if (s_instance == this) s_instance = null;
     }
 
     private sealed class CameraFocusBridge
@@ -699,12 +770,12 @@ public sealed class GameSpeedDebugController : MonoBehaviour
 #if UNITY_EDITOR
 // Kept in this file so copying a single .cs also brings the Inspector buttons.
 // UnityEditor references are excluded from player builds.
-[CustomEditor(typeof(GameSpeedDebugController))]
-public sealed class GameSpeedDebugControllerEditor : Editor
+[CustomEditor(typeof(GameDebugController))]
+public sealed class GameDebugControllerEditor : Editor
 {
     public override void OnInspectorGUI()
     {
-        GameSpeedDebugController controller = (GameSpeedDebugController)target;
+        GameDebugController controller = (GameDebugController)target;
         bool canControl = EditorApplication.isPlaying && controller.isActiveAndEnabled;
         EditorGUILayout.LabelField("Game Speed", EditorStyles.boldLabel);
         EditorGUILayout.LabelField("Current speed", Time.timeScale.ToString("0.##") + "x");
@@ -772,7 +843,7 @@ public sealed class GameSpeedDebugControllerEditor : Editor
         return EditorApplication.isPlaying;
     }
 
-    private void DrawCameraFocus(GameSpeedDebugController controller, bool canControl)
+    private void DrawCameraFocus(GameDebugController controller, bool canControl)
     {
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Camera Focus", EditorStyles.boldLabel);
@@ -805,7 +876,7 @@ public sealed class GameSpeedDebugControllerEditor : Editor
     }
 
     private static void DrawGameButton(
-        GameSpeedDebugController controller, string label, float speed)
+        GameDebugController controller, string label, float speed)
     {
         if (GUILayout.Button(label)) controller.SetGameSpeed(speed);
     }

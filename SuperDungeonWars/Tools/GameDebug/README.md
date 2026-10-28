@@ -1,16 +1,18 @@
 # ゲーム速度・リザルト宝箱・カメラデバッグ
 
-`GameSpeedDebugController.cs` 1本に、ゲーム速度、結果の宝箱開封待ち時間、キャラクターへのカメラフォーカス、Inspectorの操作ボタンをまとめています。ゲーム固有のアセンブリ参照やInspectorへのオブジェクト指定、追加パッケージは不要です。
+`GameDebugController.cs` 1本に、ゲーム速度、結果の宝箱開封待ち時間、キャラクターへのカメラフォーカス、Inspectorの操作ボタンをまとめています。旧名はGameSpeedDebugControllerです。ゲーム固有のアセンブリ参照やInspectorへのオブジェクト指定、追加パッケージは不要です。
 
 ## 設置
 
-1. `GameSpeedDebugController.cs` を対象プロジェクトの `Assets/` 以下へコピーします。Editorフォルダには入れません。
-2. 旧版でシーンやPrefabにアタッチした `GameSpeedDebugController` は外します。専用の空のGameObjectなら、そのGameObjectを削除します。
-3. Playすると、起動時に `GameSpeedDebugController` が1つだけ自動生成されます。Hierarchyの `DontDestroyOnLoad` 内でそのGameObjectを選ぶと、Inspectorに操作ボタンが表示されます。
+1. `GameDebugController.cs` を対象プロジェクトの `Assets/` 以下へコピーします。Editorフォルダには入れません。旧 `GameSpeedDebugController.cs` は新しいファイルへ置き換え、両方を残さないでください。
+2. 旧版でシーンやPrefabにアタッチしたデバッグコンポーネントは外します。専用の空のGameObjectなら、そのGameObjectを削除します。
+3. Playすると、起動時に `GameDebugController` が1つだけ自動生成されます。Hierarchyの `DontDestroyOnLoad > GameDebugController` を選ぶと、Inspectorに操作ボタンが表示されます。
 
 自動生成はEditorのPlayとDevelopment Buildで有効です。スクリプトのアタッチやシーンの変更は不要です。初期設定をシーンで指定したい場合は、専用の空のルートGameObjectに手動でアタッチする従来の使い方も可能です。その場合、再読み込みするシーンへの配置は避け、起動用シーンに置きます。
 
 旧版の `Editor/GameSpeedDebugControllerEditor.cs` は削除してください。Inspector用コードもこの1本に含まれています。旧 `BattleResultFastForwardController` がアタッチされている場合は外して、同じ待ち時間を二重に短縮しないようにします。
+
+新名のコントローラーが複数作られた場合は最初の1個を保持し、後のコピーは動作を始める前に無効化して除去します。旧名のコントローラーが実行中に存在する場合も無効化して除去します。ゲームの管理オブジェクトへ取り付けられている場合は、デバッグコンポーネントだけを除去します。シーンの再読み込みに伴う設定のコピー保存は行わず、同じ本体が設定値を持ち続けます。
 
 ## 操作
 
@@ -35,6 +37,8 @@ Play中の設定はシーンを再読み込みしても引き継ぎます。保�
 保持する範囲は同じPlayセッションです。Playを停止して開始し直したときは、スクリプトの初期設定から始まります。手動配置の場合はシーンに保存した設定を使います。`Reset` の基準速度は、再読み込み後も最初の開始時の値です。
 
 ## カメラフォーカス
+
+Play開始時は赤チームの1番をフォーカスします。まだ生成されていなければWaitingになり、生成後に自動で追従します。プルダウンの初期選択も赤です。
 
 Inspectorの **Camera Focus** で **Team** のプルダウンから赤・青・黄・緑を選び、**1・2・3・4** のいずれかを押すと、そのチームに登録された順のキャラクターへ観戦カメラが移動して追従します。番号は画面上では1始まりで、ゲーム内部のメンバー番号0〜3に対応します。プルダウンの変更は、番号を押した時点でカメラへ反映します。
 

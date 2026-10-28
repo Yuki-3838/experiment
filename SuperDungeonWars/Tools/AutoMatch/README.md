@@ -50,7 +50,7 @@ EditorではUnityプロジェクト直下の `AutoMatchResults/` にUTF-8のCSV�
 - 紹介・カウントダウン・試合終了・Resultの入力待ちは、既存のSceneFlowや演出のメソッドをリフレクションで呼んで進めます。計測中のキー操作は不要です。
 - 次の試合は既存のFinish処理によるシーン再読み込みで開始します。ツール自身はDontDestroyOnLoadに残り、再生成しません。
 - 元のMazeGeneratorは `m_seed` の設定値を使わず、審査済み一覧からSeedを選びます。計測時は一覧の配列要素を迷路生成の間だけ同じSeedへ揃え、生成直後に元へ戻します。停止・エラー時にも復元します。生成ログから実際のSeedを照合し、固定を確認できない版では停止します。
-- GameSpeedDebugControllerとBattleResultFastForwardControllerは計測中だけ無効にし、終了時に有効状態を戻します。時間設定・FPS・バックグラウンド実行設定も戻します。
+- GameDebugController（旧GameSpeedDebugController）とBattleResultFastForwardControllerは計測中だけ無効にし、終了時に有効状態を戻します。時間設定・FPS・バックグラウンド実行設定も戻します。
 
 ## 確認範囲・制限
 
