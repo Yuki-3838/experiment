@@ -27,7 +27,13 @@
 
 前版は1入口へ3人を集中する設定だった。最新の指摘に合わせ、メンバー0を回収、1〜3を自陣以外の3入口へ1人ずつ固定配置する。各自の入口から1マス内側で待ち、迎撃・回収範囲と状態表示も担当ごとに決める。[分担配置の変更点](AIExperiments/Ariadne/AMBUSH_SPREAD_CHANGES.md)。
 
-今回の分担配置は隔離プロジェクトでコンパイルのみ確認。再生・物理待機・対戦比較は未実施。以下の物理確認は前版の1入口集中配置の記録であり、分担配置の動作確認として扱わない。
+小停止修正後の分担配置を、実際の移動・視界・衝突を使う隔離環境の1マップ×4開始方向で確認した。3人が異なる担当入口へ到着し、押し戻し後も復帰して3人同時12秒以上待機した。敵・宝・戦闘・得点のない条件で、対戦比較はしていない。
+
+## セル到着時の小停止修正（2026-10-28）
+
+到達済みセルへの移動命令が残り、次の判断まで最大約0.12ゲーム内秒待つ現象を再現した。両AIを、セル到着時に同じ仕事の移動だけ継続するよう変更。担当を決める周期は0.12秒のまま。通常版・待ち伏せ版×4開始方向の各30秒では、該当する命令待ちが合計984回から0回になった。
+
+通常版は2条件で約25秒の別の停滞が残る。すべての停止が解消したとはいえず、強さの改善も未測定。Editor検索インデックス例外を含む条件と限界は [小停止の確認記録](AIExperiments/Ariadne/MICRO_STOP_CHANGES.md) を参照。必要なC#の本数は変わらない。
 
 ## 入口待機に関する前回の修正
 
@@ -61,6 +67,7 @@
 | 独立待ち伏せ版・2026-10-27 | [分離後の固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-ambush1/SuperDungeonWars) | 通常AIと分離、3人を1入口へ配置、待機を初期設定に変更。[確認範囲と変更点](AIExperiments/Ariadne/AMBUSH1_CHANGES.md) |
 | 共通C4・待機修正・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-c4-hold/SuperDungeonWars) | 共通地形推定を両AIへ接続、入口の実座標維持。[変更点と確認範囲](AIExperiments/Ariadne/C4_HOLD_CHANGES.md) |
 | 3入口分担・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-ambush-spread/SuperDungeonWars) | 入口を担当ごとに分離。[変更点](AIExperiments/Ariadne/AMBUSH_SPREAD_CHANGES.md) |
+| 小停止修正・2026-10-28 | [固定保存版](https://github.com/Yuki-3838/experiment/tree/superdungeonwars-ariadne-microstop/SuperDungeonWars) | 到着時に移動だけを継続。3入口の物理待機も限定確認。[変更点と残る停滞](AIExperiments/Ariadne/MICRO_STOP_CHANGES.md) |
 
 過去のタグと記録は固定のまま残す。2・3日目は当時の仮番号Party1111111、4日目以降は正式番号0004838。
 

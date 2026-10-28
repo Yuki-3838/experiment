@@ -20,6 +20,9 @@ namespace Party0004838
         // 自部隊の公開観測を個人AIへ伝える連絡帳。部隊終了時に登録を解除する。
         private readonly AriadneTactics tactics = new AriadneTactics();
         private PartyMemberInfo[] members;
+        // 最後に選んだ移動の目的地と、その経路を指示したセル。判断待ちの間の継続にだけ使う。
+        private int[] movementTargets, movementFromCells;
+        private bool hasObservedDanger;
 
         // [メンバー番号][セル番号]。距離の単位はマス、firstStepsは最初に進む隣接セル。
         // 配列は初回だけ確保し、毎回の経路探索で使い回す。
@@ -62,8 +65,9 @@ namespace Party0004838
 
         protected override void SXG_OnPartyThink()
         {
-            // 全員分の探索を毎フレームやり直す負荷を抑える。0.12秒ごとに再計画する。
-            if (Time.time < nextThink) return;
+            // 仕事の選択は0.12秒ごと。周期の間にセルへ到着した場合は移動だけを即座に継続し、
+            // 到達済みセルへの命令を再送して立ち止まる時間をなくす。
+            if (Time.time < nextThink) { ContinueMovesAtCellArrival(); return; }
             nextThink = Time.time + 0.12f;
             KnownMapView map = SXG_GetKnownMap();
             if (map == null) return;
@@ -74,6 +78,7 @@ namespace Party0004838
                 graph = new AriadneMap(map.Width, map.Height);
                 int count = SXG_GetMemberCount();
                 members = new PartyMemberInfo[count];
+                movementTargets = new int[count]; movementFromCells = new int[count];
                 distances = new int[count][]; firstSteps = new int[count][];
                 goals = new int[count]; assigned = new bool[count];
                 danger = new float[graph.Size]; returnExits = new int[count];
@@ -89,6 +94,8 @@ namespace Party0004838
             reserved.Clear();
             for (int i = 0; i < members.Length; i++)
             {
+                // この判断で停止・ロック・別の仕事になった場合、古い移動を勝手に再開しない。
+                movementTargets[i] = -1;
                 SXG_TryGetMemberInfo(i, out members[i]);
                 if (members[i] != null && !members[i].IsKnockedOut)
                     graph.RecordCentralVisit(graph.Index(members[i].CurrentCell));
@@ -103,7 +110,8 @@ namespace Party0004838
             }
             IReadOnlyList<VisibleCharacterData> visibleCharacters = SXG_GetVisibleCharacters();
             tactics.Refresh(members, visibleCharacters, map);
-            bool hasDanger = RefreshDanger(visibleCharacters);
+            hasObservedDanger = RefreshDanger(visibleCharacters);
+            bool hasDanger = hasObservedDanger;
             for (int i = 0; i < members.Length; i++)
             {
                 if (assigned[i] || !members[i].HasTreasure) continue;
@@ -119,6 +127,8 @@ namespace Party0004838
                     danger, returnExits[i], 120f - (Time.time - startedAt), out int next, out int saferExit))
                 {
                     returnExits[i] = saferExit;
+                    movementTargets[i] = saferExit;
+                    movementFromCells[i] = graph.Index(members[i].CurrentCell);
                     SXG_SetMemberMoveTargetCell(i, graph.Cell(next));
                 }
                 else
@@ -202,6 +212,56 @@ namespace Party0004838
                     { length = distances[i][frontier]; target = frontier; }
                 goals[i] = target; assigned[i] = true;
                 if (target >= 0) Move(i, target); else SXG_StopMember(i);
+            }
+        }
+
+        /// <summary>判断周期の間も、到着した仲間の移動だけを続ける。仕事の割当は変更しない。</summary>
+        private void ContinueMovesAtCellArrival()
+        {
+            if (members == null || movementTargets == null) return;
+            bool refreshed = false;
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (movementTargets[i] < 0 || !SXG_TryGetMemberInfo(i, out PartyMemberInfo current)
+                    || current == null || current.IsKnockedOut || current.IsActionLocked) continue;
+                int cell = graph.Index(current.CurrentCell);
+                if (cell == movementFromCells[i]) continue;
+                // 新しいセルの公開観測を取り込み、経路だけを計算し直す。全員の仕事を再選択しない。
+                if (!refreshed)
+                {
+                    KnownMapView map = SXG_GetKnownMap();
+                    if (map == null) return;
+                    graph.Refresh(map); refreshed = true;
+                }
+                movementFromCells[i] = cell;
+                graph.Search(cell, distances[i], firstSteps[i]);
+                int target = movementTargets[i];
+                if (current.HasTreasure)
+                {
+                    // 搬出もセルごとに待たない。可視の危険を記録していた場合は従来の安全経路を保つ。
+                    target = graph.ClosestExit(distances[i]);
+                    if (hasObservedDanger && graph.TrySaferReturn(cell, distances[i], danger, returnExits[i],
+                        120f - (Time.time - startedAt), out int safeNext, out int safeExit))
+                    {
+                        returnExits[i] = safeExit; movementTargets[i] = safeExit;
+                        SXG_SetMemberMoveTargetCell(i, graph.Cell(safeNext));
+                        continue;
+                    }
+                    movementTargets[i] = target; returnExits[i] = target;
+                }
+                if (target < 0) { SXG_StopMember(i); continue; }
+                if (cell == target)
+                {
+                    // 目的地の宝へは観測済みの実座標で接触を続ける。待ち伏せ地点等への到着は停止する。
+                    if (!current.HasTreasure && treasures.TryGetValue(pickupIds[i], out TreasureMemory treasure)
+                        && treasure.Cell == target)
+                        SXG_SetMemberMoveTargetWorld(i, treasure.Position);
+                    else SXG_StopMember(i);
+                    continue;
+                }
+                int next = firstSteps[i][target];
+                if (next >= 0) SXG_SetMemberMoveTargetCell(i, graph.Cell(next));
+                else SXG_StopMember(i);
             }
         }
 
@@ -510,6 +570,8 @@ namespace Party0004838
         /// </summary>
         private void Move(int member, int target)
         {
+            movementTargets[member] = target;
+            movementFromCells[member] = graph.Index(members[member].CurrentCell);
             if (graph.Index(members[member].CurrentCell) != target)
             {
                 int next = firstSteps[member][target];
