@@ -18,6 +18,13 @@ namespace AriadneEntranceAmbush
         [Min(1f)] [SerializeField] private float m_noCarrierWaitSeconds = 8f;
         [Tooltip("近場の回収・探索へ切り替えるゲーム内秒数。拾った宝は期限を越えても搬出する。")]
         [Min(1f)] [SerializeField] private float m_nearbyCollectionSeconds = 8f;
+        [Header("敵が落とした宝の回収範囲")]
+        [InspectorName("担当入口からの回収距離（マス）")]
+        [Tooltip("敵が所持していたと観測した落下宝の回収範囲。担当入口から既知通路を歩く距離。初期2マス。")]
+        [Min(0)] [SerializeField] private int m_enemyDropEntranceSteps = 2;
+        [InspectorName("本人からの回収距離（マス）")]
+        [Tooltip("同じ落下宝まで本人が歩く距離の上限。初期4マス。入口側の上限と両方を満たす必要がある。")]
+        [Min(0)] [SerializeField] private int m_enemyDropMemberSteps = 4;
         [Header("現在の担当（実行中の診断表示）")]
         [Tooltip("観測と自分の命令だけによる表示。経路探索中と、入口へ到着して待機中を区別する。")]
         [SerializeField] private string[] m_memberStates;
@@ -404,7 +411,7 @@ namespace AriadneEntranceAmbush
                     engaging[i] = false; regroup[i] = true;
                     ApproachAmbushPost(i, post); continue;
                 }
-                // 運搬者を止める方を落下宝より優先。奪った宝も入口から2歩以内に限定する。
+                // 運搬者を止める方を落下宝より優先。奪取の距離はInspectorの2種類の上限を使う。
                 TreasureMemory loot = SelectAmbushTreasure(i, true, float.PositiveInfinity);
                 if (loot != null)
                 {
@@ -457,14 +464,18 @@ namespace AriadneEntranceAmbush
 
         private TreasureMemory SelectAmbushTreasure(int member, bool stolenOnly, float pickupSecondsLeft)
         {
+            // 距離の単位は直線半径ではなく、既知通路を進むマス数。0なら同じセルだけ。
+            // 一時回収ON時の通常宝は従来の4マス。奪取だけを独立して調整する。
+            int entranceLimit = stolenOnly ? Mathf.Max(0, m_enemyDropEntranceSteps) : 4;
+            int memberLimit = stolenOnly ? Mathf.Max(0, m_enemyDropMemberSteps) : 4;
             TreasureMemory best = null;
             float bestScore = float.NegativeInfinity;
             foreach (TreasureMemory treasure in treasures.Values)
             {
                 if ((stolenOnly && !treasure.EnemyDrop) || reserved.Contains(treasure.Cell)) continue;
                 if (treasure.Cell < 0 || treasure.Cell >= graph.Size
-                    || postDistances[treasure.Cell] < 0 || postDistances[treasure.Cell] > (stolenOnly ? 2 : 4)) continue;
-                if (!TryCollectionTime(member, treasure, out int distance, out float seconds) || distance > 4) continue;
+                    || postDistances[treasure.Cell] < 0 || postDistances[treasure.Cell] > entranceLimit) continue;
+                if (!TryCollectionTime(member, treasure, out int distance, out float seconds) || distance > memberLimit) continue;
                 // 切り替え期限には拾うまでの0.72秒/歩＋接触余裕0.5秒を収める。搬出は期限後も続ける。
                 if (distance * 0.72f + 0.5f > pickupSecondsLeft) continue;
                 float score = treasure.Value / seconds * (pickupIds[member] == treasure.Id ? 1.15f : 1f);
