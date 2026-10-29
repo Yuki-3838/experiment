@@ -5,7 +5,7 @@ using SuperDungeonWars.AI;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化3（2026-10-26）。既知経路・帰還経路と、公開された中央ホールの確認先を求める。
+    /// 2026-10-29。観測地形による経路と、選択済みの搬出口を保つ帰還経路を求める。
     /// 観測地形と汎用C4ビューの回転推定で経路を作る。推定と実測は分けて保持する。
     /// 完全未知のセルは探索の終点にだけ使う。宝や敵の位置を回転コピーしない。
     /// </summary>
@@ -31,6 +31,8 @@ namespace Party0004838
 
         // 観測済みの通路から1歩で入れる未観測セル。探索担当の目標候補になる。
         internal readonly List<int> Frontiers = new List<int>();
+        internal int Width => width;
+        internal int Height => height;
         internal int Size => width * height;
         internal int CenterCell => (height / 2) * width + width / 2;
 
@@ -78,14 +80,8 @@ namespace Party0004838
         {
             get
             {
-                bool known = false;
-                for (int i = 0; i < Size; i++)
-                {
-                    if (!centralHall[i]) continue;
-                    known = true;
-                    if (!centralVisited[i]) return false;
-                }
-                return known;
+                for (int i = 0; i < Size; i++) if (centralVisited[i]) return true;
+                return false;
             }
         }
 
@@ -260,9 +256,10 @@ namespace Party0004838
             for (int i = 0; i < Size; i++)
             {
                 if (ExitDistances[i] != 0 || routeFirst[i] < 0 || routeSteps[i] > stepLimit) continue;
+                if (previousExit >= 0 && i != previousExit) continue;
                 // 運搬1.05秒/歩と投げ動作等の1.5秒。間に合わない遠回りは採用しない。
                 if (routeSteps[i] * 1.05f + 1.5f > secondsLeft) continue;
-                // 前回の搬出口を10%優遇し、軽微な危険変化で出口を切り替え続けない。
+                // 選択済みの搬出口を維持し、軽微な危険変化で別の入口へ折り返さない。
                 float score = routeCost[i] * (i == previousExit ? 0.9f : 1f);
                 if (score >= best) continue;
                 best = score; chosenExit = i; nextStep = routeFirst[i];

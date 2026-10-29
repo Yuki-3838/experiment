@@ -4,8 +4,11 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化3（2026-10-26）。中央の金宝箱へ1人を優先し、残りで近場を回収する。効果は未測定。
-    /// Ariadneの部隊全体を指揮するAI。4人へ探索・回収・帰還の仕事を割り当てる。
+    /// 2026-10-29。中央探索・回収・護衛・運搬者への先回りを4人で分担する。
+    /// 検証: 現行サンプル3種・審査済み13マップ×4位置で39/52勝（75.00%）。
+    /// AutoMatch設定: 全チーム回転、初期乱数12345、FPS120、速度4。
+    /// 連戦中断後の残り7条件の追加確認を含む。元の45試合の結果は保持した。
+    /// 未知経路が残る間は探索者を保ち、既知の回収では4人の候補をまとめて比較する。
     /// 判断材料は公開観測とその回転推定。非公開の生成済み迷路やシードは参照しない。
     /// </summary>
     public sealed class Party0004838Party : ComPartyBase
@@ -20,6 +23,16 @@ namespace Party0004838
         // 自部隊の公開観測を個人AIへ伝える連絡帳。部隊終了時に登録を解除する。
         private readonly AriadneTactics tactics = new AriadneTactics();
         private PartyMemberInfo[] members;
+        private readonly List<TreasureMemory> jobPool = new List<TreasureMemory>();
+        private int[,] jobChoices;
+        private float[,] jobValues;
+        private int[] jobAssignment, bestAssignment, homeDistances, homeFirst;
+        private bool[] jobUsed;
+        private float bestJobValue;
+        private int[] enemyDistances, enemyFirst, enemyExitDistances, enemyExitFirst;
+        private int cachedEnemy = -1;
+        private bool interceptCacheValid;
+        private float cachedEnemyAt = -1;
         // 最後に選んだ移動の目的地と、その経路を指示したセル。判断待ちの間の継続にだけ使う。
         private int[] movementTargets, movementFromCells;
         private bool hasObservedDanger;
@@ -36,16 +49,16 @@ namespace Party0004838
         private int[] returnExits;
 
         // pickupIdsは回収する宝そのもののID。セルだけでなくIDも保持し、同じセルの別の宝へ向かわない。
-        // longJobsは長い回収を始めた担当。運搬中も遠征枠を保持し、同時に遠征へ出す人数を制限する。
+        // longJobsは中央・通常回収の仕事の種類を記録する。
         private int[] pickupIds;
         private bool[] longJobs;
         private enum CollectionKind { Nearby, ShortTrip, LongerTrip }
         // 中央担当のメンバー番号と、金宝箱が最後に見えたときの運搬状態。
         // 運搬中と観測した後は、落ちた金宝箱を再観測するまで空の中央へ向かわない。
-        private int centralRunner = -1;
+        private int centralRunner = -1, homeExit = -1;
         private bool centralCarried;
 
-        // 戦闘支援は同時に1人まで。継続時間と再開待ちの単位はゲーム内秒。
+        // 継続中の戦闘支援を記録する。継続時間と再開待ちの単位はゲーム内秒。
         private int tacticalMember = -1, tacticalEnemy = -1;
         private float tacticalUntil, tacticalRestUntil;
 
@@ -76,8 +89,15 @@ namespace Party0004838
                 // 初回の思考時に、実際のマップ寸法と部隊人数に合わせて作業領域を用意する。
                 startedAt = Time.time;
                 graph = new AriadneMap(map.Width, map.Height);
+                if (SXG_TryGetReturnEntranceCell(out Vector2Int home)) homeExit = graph.Index(home);
                 int count = SXG_GetMemberCount();
                 members = new PartyMemberInfo[count];
+                enemyDistances = new int[graph.Size]; enemyFirst = new int[graph.Size];
+                enemyExitDistances = new int[graph.Size]; enemyExitFirst = new int[graph.Size];
+                jobChoices = new int[count, 6]; jobValues = new float[count, 6];
+                jobAssignment = new int[count]; bestAssignment = new int[count];
+                jobUsed = new bool[graph.Size];
+                homeDistances = new int[graph.Size]; homeFirst = new int[graph.Size];
                 movementTargets = new int[count]; movementFromCells = new int[count];
                 distances = new int[count][]; firstSteps = new int[count][];
                 goals = new int[count]; assigned = new bool[count];
@@ -91,6 +111,7 @@ namespace Party0004838
             }
             // 仲間の誰かが新しく観測した通路を取り込み、帰還距離も更新する。
             graph.Refresh(map);
+            if (homeExit >= 0) graph.Search(homeExit, homeDistances, homeFirst);
             reserved.Clear();
             for (int i = 0; i < members.Length; i++)
             {
@@ -109,7 +130,7 @@ namespace Party0004838
                 graph.Search(graph.Index(members[i].CurrentCell), distances[i], firstSteps[i]);
             }
             IReadOnlyList<VisibleCharacterData> visibleCharacters = SXG_GetVisibleCharacters();
-            tactics.Refresh(members, visibleCharacters, map);
+            tactics.Refresh(members, visibleCharacters, map, distances, graph, SXG_GetVisibleTreasures());
             hasObservedDanger = RefreshDanger(visibleCharacters);
             bool hasDanger = hasObservedDanger;
             for (int i = 0; i < members.Length; i++)
@@ -120,7 +141,8 @@ namespace Party0004838
                 // 自分の出発口に限らず、既知経路の近さと可視の敵への接近を考慮する。
                 assigned[i] = true;
                 pickupIds[i] = -1;
-                int exit = graph.ClosestExit(distances[i]);
+                int exit = ChooseExit(i);
+                if (returnExits[i] < 0) returnExits[i] = exit;
                 // 敵が見えるときは、既知通路の範囲で危険を避ける帰還も比較する。
                 // 敵を避けるための際限のない遠回りはMap側の6歩・残り秒数で制限する。
                 if (hasDanger && graph.TrySaferReturn(graph.Index(members[i].CurrentCell), distances[i],
@@ -140,8 +162,8 @@ namespace Party0004838
             }
             RememberTreasures();
 
-            // 探索と宝の回収を同じ点数で競わせず、中央担当と近場回収を探索より先に確保する。
-            // 投げ動作などでロック中の運搬者・回収担当も、すでに働いている人数として数える。
+            // 運搬担当を確保した後、全員を回収効率で割り当てる。
+            // 人数・遠征時間による固定上限を置かず、終了までに搬出できる仕事を比較する。
             int collectors = 0;
             for (int i = 0; i < members.Length; i++)
             {
@@ -150,20 +172,17 @@ namespace Party0004838
                 { pickupIds[i] = -1; longJobs[i] = false; }
                 if (members[i].HasTreasure || (assigned[i] && pickupIds[i] >= 0)) collectors++;
                 if (!members[i].HasTreasure && assigned[i]
-                    && treasures.TryGetValue(pickupIds[i], out TreasureMemory pendingPickup))
-                    reserved.Add(pendingPickup.Cell);
+                    && treasures.TryGetValue(pickupIds[i], out TreasureMemory pendingPickup)) reserved.Add(pendingPickup.Cell);
             }
-            // 金宝箱は通常の距離・効率比較へ埋もれさせず、手ぶらの中央担当を先に1人確保する。
             AssignCentralObjective(ref collectors);
-            // 中央担当以外は、4歩以内かつ回収・搬出24秒以内の宝を探索より先に確保する。
-            AssignCollections(CollectionKind.Nearby, members.Length, ref collectors);
-            // それ以外の短い回収は、通常1人を探索等へ残す。近場回収で全員埋まった場合は上書きしない。
-            int collectorLimit = Mathf.Max(1, members.Length - 1);
-            AssignCollections(CollectionKind.ShortTrip, collectorLimit, ref collectors);
-            // 中央担当がいる間は通常宝への新しい遠征を出さない。運搬中の仕事は先に確保済み。
-            if (centralRunner < 0 && !HasLongCollection())
-                AssignCollections(CollectionKind.LongerTrip, collectorLimit, ref collectors);
             AssignSupport(visibleCharacters);
+            if (centralRunner >= 0 && pickupIds[centralRunner] < 0)
+            {
+                // 金宝箱への経路が不明な間は、中央担当とは別に探索者を1人残す。
+                AssignCollections(CollectionKind.Nearby, members.Length, ref collectors);
+                AssignCollections(CollectionKind.ShortTrip, Mathf.Max(1, members.Length - 1), ref collectors);
+            }
+            else AssignEfficientCollections();
 
             // 回収・搬出・支援の担当を確保した後、残った仲間だけへ探索を割り当てる。
             for (int round = 0; round < members.Length; round++)
@@ -239,7 +258,7 @@ namespace Party0004838
                 if (current.HasTreasure)
                 {
                     // 搬出もセルごとに待たない。可視の危険を記録していた場合は従来の安全経路を保つ。
-                    target = graph.ClosestExit(distances[i]);
+                    target = ChooseExit(i);
                     if (hasObservedDanger && graph.TrySaferReturn(cell, distances[i], danger, returnExits[i],
                         120f - (Time.time - startedAt), out int safeNext, out int safeExit))
                     {
@@ -255,7 +274,7 @@ namespace Party0004838
                     // 目的地の宝へは観測済みの実座標で接触を続ける。待ち伏せ地点等への到着は停止する。
                     if (!current.HasTreasure && treasures.TryGetValue(pickupIds[i], out TreasureMemory treasure)
                         && treasure.Cell == target)
-                        SXG_SetMemberMoveTargetWorld(i, treasure.Position);
+                        SXG_SetMemberMoveTargetWorld(i, InsideMaze(treasure.Position));
                     else SXG_StopMember(i);
                     continue;
                 }
@@ -347,10 +366,84 @@ namespace Party0004838
             SetCentralRunner(runner); Move(runner, target);
         }
 
+        private void AssignEfficientCollections()
+        {
+            for (int i = 0; i < members.Length; i++)
+                if (assigned[i] && pickupIds[i] >= 0
+                    && treasures.TryGetValue(pickupIds[i], out TreasureMemory pending)) reserved.Add(pending.Cell);
+            jobPool.Clear();
+            foreach (TreasureMemory treasure in treasures.Values)
+                if (!reserved.Contains(treasure.Cell)) jobPool.Add(treasure);
+            for (int j = 0; j < jobPool.Count; j++) jobUsed[j] = false;
+            float explorationValue = 120f - (Time.time - startedAt) > 35f ? 0.024f : 0.005f;
+            for (int i = 0; i < members.Length; i++)
+            {
+                jobAssignment[i] = bestAssignment[i] = -1;
+                for (int c = 0; c < 6; c++) { jobChoices[i, c] = -1; jobValues[i, c] = explorationValue; }
+                if (assigned[i]) continue;
+                for (int j = 0; j < jobPool.Count; j++)
+                {
+                    TreasureMemory treasure = jobPool[j];
+                    if (tactics.NeedsFighter && !treasure.Central) continue;
+                    if (!TryCollectionTime(i, treasure, out int pickup, out float seconds)) continue;
+                    float value = treasure.Value / (seconds + pickup * 0.25f);
+                    if (pickupIds[i] == treasure.Id) value *= 1.2f;
+                    for (int c = 0; c < 6; c++)
+                    {
+                        if (value <= jobValues[i, c]) continue;
+                        for (int k = 5; k > c; k--)
+                        { jobChoices[i, k] = jobChoices[i, k-1]; jobValues[i, k] = jobValues[i, k-1]; }
+                        jobChoices[i, c] = j; jobValues[i, c] = value; break;
+                    }
+                }
+            }
+            bestJobValue = float.NegativeInfinity;
+            ChooseJobs(0, 0, explorationValue);
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (assigned[i] || bestAssignment[i] < 0) continue;
+                TreasureMemory treasure = jobPool[bestAssignment[i]];
+                assigned[i] = true; goals[i] = treasure.Cell; pickupIds[i] = treasure.Id;
+                reserved.Add(treasure.Cell);
+                if (treasure.Central) SetCentralRunner(i);
+                Move(i, treasure.Cell);
+            }
+        }
+
+        // 各人の上位6候補だけを使い、4人全体の回収効率が高い重複しない組合せを選ぶ。
+        // 回収より探索の期待値が高い人は、無理に遠い宝へ向かわず探索を続ける。
+        private void ChooseJobs(int member, float value, float explorationValue)
+        {
+            if (member == members.Length)
+            {
+                if (value <= bestJobValue) return;
+                bestJobValue = value;
+                for (int i = 0; i < members.Length; i++) bestAssignment[i] = jobAssignment[i];
+                return;
+            }
+            jobAssignment[member] = -1;
+            if (assigned[member]) { ChooseJobs(member + 1, value, explorationValue); return; }
+            ChooseJobs(member + 1, value + explorationValue, explorationValue);
+            for (int c = 0; c < 6; c++)
+            {
+                int job = jobChoices[member, c];
+                if (job < 0 || jobUsed[job]) continue;
+                bool sameCell = false;
+                for (int i = 0; i < member; i++)
+                    if (jobAssignment[i] >= 0 && jobPool[jobAssignment[i]].Cell == jobPool[job].Cell) sameCell = true;
+                if (sameCell) continue;
+                jobAssignment[member] = job; jobUsed[job] = true;
+                ChooseJobs(member + 1, value + jobValues[member, c], explorationValue);
+                jobUsed[job] = false;
+            }
+            jobAssignment[member] = -1;
+        }
+
         private void SetCentralRunner(int member)
         {
             centralRunner = member;
-            tactics.SetCentralRunner(members[member].CharacterId);
+            // 金宝箱を実際に発見するまでは、探索経路上の通常宝も持ち帰れる。
+            if (pickupIds[member] >= 0) tactics.SetCentralRunner(members[member].CharacterId);
         }
 
         /// <summary>
@@ -405,9 +498,13 @@ namespace Party0004838
         {
             pickupDistance = -1; seconds = float.PositiveInfinity;
             if (treasure.Cell < 0 || treasure.Cell >= graph.Size) return false;
+            if(treasure.Central && !tactics.CanApproachGold(members[member].CharacterId)) return false;
             pickupDistance = distances[member][treasure.Cell];
             int back = graph.ExitDistances[treasure.Cell];
             if (pickupDistance < 0 || back < 0) return false;
+            int home = homeExit >= 0 ? homeDistances[treasure.Cell] : -1;
+            if (home >= 0 && home <= back + 8
+                && pickupDistance * 0.72f + home * 1.05f + 3f <= 120f - (Time.time - startedAt)) back = home;
             // セル間隔2・通常速度3・運搬速度2。小さな移動余裕と動作ロック等の3秒を含む。
             // 衝突、戦闘、危険回避の寄り道まで予測するものではない。
             seconds = pickupDistance * 0.72f + back * 1.05f + 3f;
@@ -432,15 +529,24 @@ namespace Party0004838
             {
                 foreach (VisibleCharacterData enemy in visible)
                 {
-                    if (enemy.CharacterId != tacticalEnemy || Time.time >= tacticalUntil
-                        || assigned[tacticalMember] || !CanSupport(tacticalMember, enemy)) continue;
+                    if (enemy.CharacterId != tacticalEnemy) continue;
+                    bool defense = tactics.ThreatensCarrier(enemy.CharacterId);
+                    if (defense && members[tacticalMember] != null && !members[tacticalMember].IsKnockedOut
+                        && !members[tacticalMember].HasTreasure && members[tacticalMember].IsActionLocked)
+                    {
+                        tactics.SetEscort(members[tacticalMember].CharacterId);
+                        assigned[tacticalMember] = true; return;
+                    }
+                    if ((!defense && Time.time >= tacticalUntil) || assigned[tacticalMember]
+                        || !CanSupport(tacticalMember, enemy)) continue;
                     IssueSupport(tacticalMember, enemy);
                     return;
                 }
                 // 接敵して行動ロックに入った時や、敵を見失った時も通常の回収へ戻す。
-                // 終了後2.4秒は新しい追跡を始めず、敵について往復する時間を抑える。
+                // 通常追跡の終了後は2.4秒待つ。護衛と金宝箱の奪取は待たず再選択する。
+                bool defending = tactics.ThreatensCarrier(tacticalEnemy) || tactics.IsGoldCarrier(tacticalEnemy);
                 tacticalMember = tacticalEnemy = -1;
-                tacticalRestUntil = Time.time + 2.4f;
+                tacticalRestUntil = Time.time + (defending ? 0f : 2.4f);
             }
             if (Time.time < tacticalRestUntil) return;
 
@@ -465,19 +571,24 @@ namespace Party0004838
                         { collectingNearby = true; break; }
                     }
                     // 4マス以内（通常移動で約2.9秒）に回収できる宝がある仲間は、任意の奪取追跡に使わない。
-                    // 追跡の上限2.4秒に近い回収機会を守り、護衛以外の寄り道を抑える。
+                    // 近い通常宝箱も守るが、2秒以内の先回りや金宝箱の奪取は優先して検討する。
                     // 味方の護衛なら候補には残すが、距離2マス相当の負担を評価へ加える。
-                    if (collectingNearby && !defense) continue;
-                    // 護衛20・奪取10は無次元の優先度。候補の最大3歩の距離差より護衛を重くする。
-                    float score = (defense ? 20f : 10f) - d - (collectingNearby ? 2f : 0f);
+                    if (collectingNearby && !defense && !tactics.IsGoldCarrier(enemy.CharacterId)
+                        && (!TryInterceptCell(i, enemy, out int quickMeeting)
+                            || distances[i][quickMeeting] * 0.72f > 2f)) continue;
+                    // 金宝箱の奪取30・護衛20・通常の奪取10を優先度とし、到達距離を差し引く。
+                    if (!defense && enemy.HasTreasure && TryInterceptCell(i, enemy, out int meeting)) d = distances[i][meeting];
+                    float score = (tactics.IsGoldCarrier(enemy.CharacterId) ? 30f : defense ? 20f : 10f)
+                        - d - (collectingNearby ? 2f : 0f);
                     if (score > bestScore) { bestScore = score; bestMember = i; bestEnemy = enemy; }
                 }
             }
             if (bestMember < 0) return;
             tacticalMember = bestMember; tacticalEnemy = bestEnemy.CharacterId;
-            // 通常速度3・セル間隔2なら、2.4秒はおおよそ3マス分の移動時間。
-            // この上限で回収役が敵を延々と追い続けるのを防ぐ。
-            tacticalUntil = Time.time + 2.4f;
+            // 通常の奪取は6秒、金宝箱の奪取は12秒を上限にする。
+            // 護衛は脅威が近くにいる間続け、それ以外の長い追跡は打ち切る。
+            tacticalUntil = Time.time + (tactics.IsGoldCarrier(bestEnemy.CharacterId) ? 12f
+                : tactics.ThreatensCarrier(bestEnemy.CharacterId) ? 4f : 6f);
             IssueSupport(bestMember, bestEnemy);
         }
 
@@ -489,9 +600,52 @@ namespace Party0004838
             int cell = graph.Index(enemy.CellPosition);
             if (cell < 0 || cell >= graph.Size) return false;
             int distance = distances[member][cell];
-            // 護衛は3歩、運搬者への迎撃は2歩以内の既知経路だけ。
-            // 運搬速度2に対する通常速度3の差は小さいため、期限2.4秒で届きにくい追跡を減らす。
-            return distance >= 0 && distance <= (defense ? 3 : 2);
+            // 護衛は既知経路6歩以内。奪取は進路上への到着予測で可否を判定する。
+            // 通常速度3・運搬速度2・セル間隔2から先回りの到着時間を見積もる。
+            if (!defense && enemy.HasTreasure) return TryInterceptCell(member, enemy, out _);
+            return distance >= 0 && distance <= 6;
+        }
+
+        // 相対チーム番号と固定の4入口から帰還先を予測し、可視の運搬者の進路へ先回りする。
+        // 予測が外れたら次の公開観測で再計算する。隠れた敵の命令や非公開マップは読まない。
+        private bool TryInterceptCell(int member, VisibleCharacterData enemy, out int target)
+        {
+            target = -1;
+            if (!enemy.HasTreasure || enemy.IsKnockedOut || homeExit < 0) return false;
+            if (cachedEnemy != enemy.CharacterId || cachedEnemyAt != Time.time)
+            {
+                cachedEnemy = enemy.CharacterId; cachedEnemyAt = Time.time; interceptCacheValid = false;
+                graph.Search(graph.Index(enemy.CellPosition), enemyDistances, enemyFirst);
+                Vector2Int entrance = graph.Cell(homeExit);
+                for (int i = 0; i < enemy.TeamIndex; i++) entrance = new Vector2Int(entrance.y, graph.Width - 1 - entrance.x);
+                int exit = graph.Index(entrance);
+                if (enemyDistances[exit] < 0) exit = graph.ClosestExit(enemyDistances);
+                if (exit < 0) return false;
+                graph.Search(exit, enemyExitDistances, enemyExitFirst); interceptCacheValid = true;
+            }
+            if (!interceptCacheValid) return false;
+            int start = graph.Index(enemy.CellPosition), trip = enemyExitDistances[start];
+            if (trip < 0) return false;
+            float best = float.PositiveInfinity;
+            for (int cell = 0; cell < graph.Size; cell++)
+            {
+                int ours = distances[member][cell], theirs = enemyDistances[cell];
+                if (ours < 0 || ours > (tactics.IsGoldCarrier(enemy.CharacterId) ? 14 : 8)
+                    || theirs < 0 || enemyExitDistances[cell] < 0 || theirs + enemyExitDistances[cell] != trip) continue;
+                float arrival = ours * 0.72f, enemyArrival = theirs * 1.05f;
+                if (arrival > enemyArrival + 0.4f
+                    || Mathf.Max(arrival, enemyArrival) > (tactics.IsGoldCarrier(enemy.CharacterId) ? 11f : 5f)) continue;
+                float score = Mathf.Max(arrival, enemyArrival) + arrival * 0.1f;
+                if (score < best) { best = score; target = cell; }
+            }
+            if (target < 0)
+            {
+                int distance = distances[member][start];
+                Vector3 delta = enemy.WorldPosition - members[member].WorldPosition; delta.y = 0;
+                bool gold = tactics.IsGoldCarrier(enemy.CharacterId);
+                if (distance >= 0 && distance <= (gold ? 4 : 3) && delta.sqrMagnitude <= (gold ? 49f : 9f)) target = start;
+            }
+            return target >= 0;
         }
 
         /// <summary>今見えている、生存中かつ手ぶらの敵だけを運搬経路の危険として扱う。</summary>
@@ -511,13 +665,23 @@ namespace Party0004838
 
         private void IssueSupport(int member, VisibleCharacterData enemy)
         {
+            if (tactics.ThreatensCarrier(enemy.CharacterId)) tactics.SetEscort(members[member].CharacterId);
+            else if (enemy.HasTreasure) tactics.SetHunter(members[member].CharacterId, enemy.CharacterId);
             assigned[member] = true; goals[member] = -1;
             pickupIds[member] = -1; longJobs[member] = false;
             int target = graph.Index(enemy.CellPosition);
+            if (enemy.HasTreasure && !tactics.ThreatensCarrier(enemy.CharacterId)
+                && TryInterceptCell(member, enemy, out int meeting))
+            {
+                if (meeting == graph.Index(enemy.CellPosition) && graph.Index(members[member].CurrentCell) == meeting)
+                    SXG_SetMemberMoveTargetWorld(member, InsideMaze(enemy.WorldPosition));
+                else Move(member, meeting);
+                return;
+            }
             // 同じセル内では、観測した敵の座標へ寄って攻撃開始範囲へ入る。
             // 別セルでは通常の経路指示を使い、壁越しの直線追跡をしない。
             if (graph.Index(members[member].CurrentCell) == target)
-                SXG_SetMemberMoveTargetWorld(member, enemy.WorldPosition);
+                SXG_SetMemberMoveTargetWorld(member, InsideMaze(enemy.WorldPosition));
             else Move(member, target);
         }
 
@@ -564,10 +728,24 @@ namespace Party0004838
             }
         }
 
-        /// <summary>
-        /// 選んだ目標までの最初の1マスだけを指示する。
-        /// 次の思考で観測情報と現在位置を見直し、経路を更新する。
-        /// </summary>
+        private int ChooseExit(int member)
+        {
+            int nearest = graph.ClosestExit(distances[member]);
+            if (nearest >= 0 && homeExit >= 0 && distances[member][homeExit] >= 0
+                && distances[member][homeExit] <= distances[member][nearest] + 8
+                && distances[member][homeExit] * 1.05f + 1.5f <= 120f - (Time.time - startedAt)) return homeExit;
+            return nearest;
+        }
+
+        // 吹き飛びで観測対象が外周より外へ出たときも、移動命令は迷宮内に収める。
+        private Vector3 InsideMaze(Vector3 position)
+        {
+            float x = graph.Width - 1 + 0.75f, z = graph.Height - 1 + 0.75f;
+            position.x = Mathf.Clamp(position.x, -x, x); position.z = Mathf.Clamp(position.z, -z, z);
+            return position;
+        }
+
+        /// <summary>目標への最初の1マスを指示し、次の公開観測で経路を更新する。</summary>
         private void Move(int member, int target)
         {
             movementTargets[member] = target;
@@ -582,7 +760,7 @@ namespace Party0004838
             // 同じセルまで来たら観測したワールド座標へ近づき、接触による取得を狙う。
             if (!members[member].HasTreasure && treasures.TryGetValue(pickupIds[member], out TreasureMemory treasure)
                 && treasure.Cell == target)
-            { SXG_SetMemberMoveTargetWorld(member, treasure.Position); return; }
+            { SXG_SetMemberMoveTargetWorld(member, InsideMaze(treasure.Position)); return; }
             SXG_StopMember(member);
         }
     }

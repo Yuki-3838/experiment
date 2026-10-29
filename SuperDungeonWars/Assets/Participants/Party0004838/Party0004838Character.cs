@@ -4,13 +4,13 @@ using UnityEngine;
 namespace Party0004838
 {
     /// <summary>
-    /// 追加強化3（2026-10-26）の個人判断。反撃と、中央担当だけの宝箱取得の選別を行う。
+    /// 2026-10-29。護衛対象と奪取対象を優先して反撃し、担当に応じて宝箱の取得を選ぶ。
     /// 移動先の決定はParty側に集約し、戦うためだけの追跡はここでは行わない。
     /// </summary>
     public sealed class Party0004838Character : ComCharacterBase
     {
         /// <summary>
-        /// ゲーム側が渡す攻撃可能な候補から、護衛対象への脅威、敵運搬者、通常敵の順に選ぶ。
+        /// ゲーム側が渡す候補から、金宝箱の運搬者、担当中の奪取対象、護衛への脅威を優先する。
         /// 返す値はキャラクターIDではなく、candidates内の添字。-1なら攻撃しない。
         /// </summary>
         protected override int SXG_ChooseAttackTargetIndex(IReadOnlyList<VisibleCharacterData> candidates)
@@ -28,8 +28,10 @@ namespace Party0004838
                 // 気絶した敵への追撃は起き上がり待ちに時間を使うため行わない。
                 bool defense = AriadneTactics.IsDefenseTarget(SXG_CharacterId, enemy.CharacterId);
                 if (enemy.IsKnockedOut) continue;
-                // 護衛を2、宝の奪取を1、通常敵を0として比較する。距離の単位とは混ぜない。
-                int priority = (defense ? 2 : 0) + (enemy.HasTreasure ? 1 : 0);
+                // 金宝箱は4、担当中の奪取は3、護衛は2に、運搬者への1を加える。距離とは混ぜない。
+                int priority = (AriadneTactics.IsGoldTarget(SXG_CharacterId, enemy.CharacterId) ? 4 : 0)
+                    + (AriadneTactics.IsHunting(SXG_CharacterId, enemy.CharacterId) && enemy.HasTreasure ? 3 : defense ? 2 : 0)
+                    + (enemy.HasTreasure ? 1 : 0);
 
                 // 比較だけなので平方根は不要。二乗距離のまま最も近い候補を選ぶ。
                 Vector3 delta = enemy.WorldPosition - SXG_WorldPosition; delta.y = 0;
@@ -40,10 +42,11 @@ namespace Party0004838
             return best;
         }
 
-        // 中央担当1人は、途中の通常宝箱で運搬を始めて目的を失わないよう選別する。
-        // ほかの仲間と、中央担当を解除された仲間は、従来どおり通常宝箱も拾える。
+        // 発見済みの金宝箱を回収する担当は、道中の通常宝箱を見送る。
+        // 金宝箱が未発見の探索では通常宝も取得する。護衛役は通常宝を見送る。
         protected override bool SXG_ShouldPickUpTreasure(TreasureType type)
-            => !SXG_HasTreasure && (type == TreasureType.CentralChest || !AriadneTactics.IsCentralRunner(SXG_CharacterId));
+            => !SXG_HasTreasure && (type == TreasureType.CentralChest || !AriadneTactics.IsCentralRunner(SXG_CharacterId))
+                && AriadneTactics.CanPickUp(SXG_CharacterId, type);
 
         // 自分の搬出という公開イベントを連絡帳へ返し、空になった中央の探索を再開させない。
         protected override void SXG_OnTreasureExported(TreasureType type)
