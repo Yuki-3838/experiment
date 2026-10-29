@@ -28,6 +28,8 @@ namespace AriadneEntranceAmbush
                 // 気絶した敵への追撃は起き上がり待ちに時間を使うため行わない。
                 bool defense = AriadneTactics.IsDefenseTarget(SXG_CharacterId, enemy.CharacterId);
                 if (enemy.IsKnockedOut) continue;
+                // 指定した相手が手ぶらの短い間だけ殴らず待つ。取得後は即座に攻撃候補へ戻す。
+                if (!enemy.HasTreasure && !defense && AriadneTactics.IsPickupBait(SXG_CharacterId, enemy.CharacterId)) continue;
                 // 運搬者3、護衛2、通常敵0の優先度。距離の単位とは混ぜない。
                 int priority = enemy.HasTreasure ? 3 : defense ? 2 : 0;
 

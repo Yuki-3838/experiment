@@ -12,6 +12,7 @@ namespace AriadneEntranceAmbush
         private static readonly Dictionary<int, AriadneTactics> Boards = new Dictionary<int, AriadneTactics>();
         private readonly HashSet<int> friends = new HashSet<int>(), threats = new HashSet<int>();
         private readonly List<int> registered = new List<int>();
+        private readonly Dictionary<int, int> pickupBait = new Dictionary<int, int>();
         private readonly Dictionary<int, bool> ambushPickup = new Dictionary<int, bool>();
         private float observedAt;
         private int centralRunnerId = -1;
@@ -23,7 +24,7 @@ namespace AriadneEntranceAmbush
         {
             Release();
             friends.Clear(); threats.Clear(); observedAt = Time.time;
-            ambushPickup.Clear();
+            ambushPickup.Clear(); pickupBait.Clear();
             centralRunnerId = -1;
             foreach (PartyMemberInfo member in members)
             {
@@ -62,6 +63,15 @@ namespace AriadneEntranceAmbush
             float age = Time.time - board.observedAt;
             // 自分の部隊からの新しい許可だけを使う。0.36秒で失効する。
             return age >= 0f && age <= 0.36f && board.ambushPickup.TryGetValue(memberId, out allowed);
+        }
+
+        // 同じ部隊の新鮮な指示だけを個人判断へ渡し、拾う前の相手への先制攻撃を控える。
+        internal void SetPickupBait(int memberId, int enemyId) => pickupBait[memberId] = enemyId;
+        internal static bool IsPickupBait(int memberId, int enemyId)
+        {
+            if (!Boards.TryGetValue(memberId, out AriadneTactics board)) return false;
+            float age = Time.time - board.observedAt;
+            return age >= 0f && age <= 0.36f && board.pickupBait.TryGetValue(memberId, out int target) && target == enemyId;
         }
 
         internal void SetCentralRunner(int characterId)

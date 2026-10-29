@@ -25,6 +25,20 @@ namespace AriadneEntranceAmbush
         [InspectorName("本人からの回収距離（マス）")]
         [Tooltip("同じ落下宝まで本人が歩く距離の上限。初期4マス。入口側の上限と両方を満たす必要がある。")]
         [Min(0)] [SerializeField] private int m_enemyDropMemberSteps = 4;
+        [Header("入口へ向かう途中の回収・拾わせて奪取")]
+        [InspectorName("道中の宝を担当入口へ運ぶ")]
+        [SerializeField] private bool m_collectEnRoute = true;
+        [InspectorName("道中回収の追加歩数上限")]
+        [Tooltip("通常宝までの寄り道で増えてよい歩数。担当入口までの既知最短経路と比較する。初期2歩。")]
+        [Min(0)] [SerializeField] private int m_enRouteExtraSteps = 2;
+        [InspectorName("道中の宝までの距離（マス）")]
+        [Tooltip("本人から道中の宝までの上限。単位は通路のマス数。初期3マス。")]
+        [Min(0)] [SerializeField] private int m_enRoutePickupSteps = 3;
+        [InspectorName("近い相手に拾わせてから奪う")]
+        [SerializeField] private bool m_waitForEnemyPickup = true;
+        [InspectorName("拾わせて待つ時間（秒）")]
+        [Tooltip("相手が宝を拾うのを待つゲーム内秒。初期0.8秒。同じ宝では1回だけ。")]
+        [Min(0.1f)] [SerializeField] private float m_enemyPickupWaitSeconds = 0.8f;
         [Header("現在の担当（実行中の診断表示）")]
         [Tooltip("観測と自分の命令だけによる表示。経路探索中と、入口へ到着して待機中を区別する。")]
         [SerializeField] private string[] m_memberStates;
@@ -56,6 +70,12 @@ namespace AriadneEntranceAmbush
         // 最後に選んだ移動の目的地と、その経路を指示したセル。判断待ちの間の継続にだけ使う。
         private int[] movementTargets, movementFromCells;
         private bool hasObservedDanger;
+        // 道中で拾う宝だけ担当入口を記憶。KO・搬出・到達不能・時間不足なら解除する。
+        private int[] deliveryEntrances, baitEnemyIds;
+        private HashSet<int>[] baitTriedTreasure;
+        private float[] baitUntil;
+        private int[] baitDistances, baitFirst;
+        private bool[] enRouteAllowed;
 
         // [メンバー番号][セル番号]。距離の単位はマス、firstStepsは最初に進む隣接セル。
         // 配列は初回だけ確保し、毎回の経路探索で使い回す。
@@ -112,6 +132,9 @@ namespace AriadneEntranceAmbush
                 int count = SXG_GetMemberCount();
                 members = new PartyMemberInfo[count];
                 movementTargets = new int[count]; movementFromCells = new int[count];
+                deliveryEntrances = new int[count]; baitEnemyIds = new int[count]; baitTriedTreasure = new HashSet<int>[count];
+                baitUntil = new float[count]; baitDistances = new int[graph.Size]; baitFirst = new int[graph.Size];
+                enRouteAllowed = new bool[count];
                 distances = new int[count][]; firstSteps = new int[count][];
                 goals = new int[count]; assigned = new bool[count];
                 danger = new float[graph.Size]; returnExits = new int[count];
@@ -127,7 +150,9 @@ namespace AriadneEntranceAmbush
                 for (int i = 0; i < count; i++)
                 {
                     distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1; returnExits[i] = -1;
-                    pickupIds[i] = -1;
+                    pickupIds[i] = -1; deliveryEntrances[i] = baitEnemyIds[i] = -1;
+                    baitTriedTreasure[i] = new HashSet<int>();
+                    enRouteAllowed[i] = i > 0;
                     holdCells[i] = -1; avoidedSteps[i] = lastSteps[i] = -1; regroup[i] = i > 0;
                 }
             }
@@ -142,7 +167,7 @@ namespace AriadneEntranceAmbush
                 SXG_TryGetMemberInfo(i, out members[i]);
                 // 搬出後も最初に担当入口の配置を回復してから迎撃・奪取へ戻る。
                 if (i > 0 && previous != null && previous.HasTreasure && members[i] != null && !members[i].HasTreasure)
-                { regroup[i] = true; engaging[i] = false; }
+                { regroup[i] = true; engaging[i] = false; deliveryEntrances[i] = baitEnemyIds[i] = -1; }
                 // 公開された前後の座標から、配置セルへ進入した向きだけを覚える。
                 // 原点やCellToWorld等のゲーム内部情報を使わず、セル境界から少し内側へ構えるため。
                 if (previous != null && members[i] != null && previous.IsMoving && !previous.IsKnockedOut
@@ -157,7 +182,7 @@ namespace AriadneEntranceAmbush
                 // 搬出やKOで手ぶらになったら前回の出口への優遇も終了し、次の運搬へ引き継がない。
                 if (members[i] != null && !members[i].HasTreasure) returnExits[i] = -1;
                 if (members[i] != null && members[i].IsKnockedOut)
-                { pickupIds[i] = -1; longJobs[i] = false; }
+                { pickupIds[i] = -1; longJobs[i] = false; deliveryEntrances[i] = baitEnemyIds[i] = -1; enRouteAllowed[i] = false; }
                 // 気絶中・行動ロック中の仲間には新しい仕事を割り当てない。
                 assigned[i] = members[i] == null || members[i].IsKnockedOut || members[i].IsActionLocked;
                 m_memberStates[i] = members[i] == null ? "メンバー未取得" : members[i].IsKnockedOut ? "KO中"
@@ -185,6 +210,8 @@ namespace AriadneEntranceAmbush
                 // 自分の出発口に限らず、既知経路の近さと可視の敵への接近を考慮する。
                 assigned[i] = true;
                 pickupIds[i] = -1;
+                if (TryDeliverEnRoute(i, graph.Index(members[i].CurrentCell)))
+                { goals[i] = -1; continue; }
                 int exit = graph.ClosestExit(distances[i]);
                 // 敵が見えるときは、既知通路の範囲で危険を避ける帰還も比較する。
                 // 敵を避けるための際限のない遠回りはMap側の6歩・残り秒数で制限する。
@@ -306,6 +333,7 @@ namespace AriadneEntranceAmbush
                 int target = movementTargets[i];
                 if (current.HasTreasure)
                 {
+                    if (TryDeliverEnRoute(i, cell)) continue;
                     // 搬出もセルごとに待たない。可視の危険を記録していた場合は従来の安全経路を保つ。
                     target = graph.ClosestExit(distances[i]);
                     if (hasObservedDanger && graph.TrySaferReturn(cell, distances[i], danger, returnExits[i],
@@ -370,6 +398,18 @@ namespace AriadneEntranceAmbush
                 // 奥の配置＋追跡半径の合計で入口から離れすぎるのを防ぐ。
                 graph.Search(graph.Index(ambush.TargetEntrance(i)), postDistances, postFirstSteps);
                 VisibleCharacterData carrier = FindAmbushCarrier(i, visible, out bool carrierNearPost);
+                // 別の運搬者が入口へ来たら、拾わせる待機より目前の搬出阻止を優先する。
+                if (carrier != null && carrier.CharacterId != baitEnemyIds[i]) baitEnemyIds[i] = -1;
+                if (HandleEnemyPickupWait(i, visible)) continue;
+                if (m_collectEnRoute && holdCells[i] < 0 && enRouteAllowed[i])
+                {
+                    TreasureMemory onWay = SelectEnRouteTreasure(i);
+                    if (onWay != null)
+                    {
+                        IssueAmbushPickup(i, onWay, visible, ref collectors, graph.Index(ambush.TargetEntrance(i)));
+                        continue;
+                    }
+                }
                 // 「隣のセルにいる」では到着扱いにしない。配置セルで止まって初めて待機を計時する。
                 Vector3 holdDelta = holdPositions[i] - members[i].WorldPosition; holdDelta.y = 0f;
                 bool nearPost = !members[i].IsMoving && distances[i][post] == 0 && map.IsObserved(graph.Cell(post))
@@ -416,7 +456,7 @@ namespace AriadneEntranceAmbush
                 if (loot != null)
                 {
                     ambush.ResetMember(i);
-                    IssueAmbushPickup(i, loot, ref collectors);
+                    IssueAmbushPickup(i, loot, visible, ref collectors);
                     m_memberStates[i] = "敵が落とした宝を回収中 → 搬出後は入口へ戻る";
                     continue;
                 }
@@ -426,7 +466,7 @@ namespace AriadneEntranceAmbush
                     tactics.SetAmbushPickup(members[i].CharacterId, true);
                     float secondsLeft = ambush.ForageSecondsLeft(i, Time.time);
                     TreasureMemory nearby = SelectAmbushTreasure(i, false, secondsLeft);
-                    if (nearby != null) { IssueAmbushPickup(i, nearby, ref collectors); continue; }
+                    if (nearby != null) { IssueAmbushPickup(i, nearby, visible, ref collectors); continue; }
                     int frontier = SelectAmbushFrontier(i, secondsLeft);
                     if (frontier >= 0)
                     {
@@ -484,12 +524,114 @@ namespace AriadneEntranceAmbush
             return best;
         }
 
-        private void IssueAmbushPickup(int member, TreasureMemory treasure, ref int collectors)
+        private void IssueAmbushPickup(int member, TreasureMemory treasure, IReadOnlyList<VisibleCharacterData> visible, ref int collectors, int delivery = -1)
         {
+            if (TryBeginEnemyPickupWait(member, treasure, visible)) return;
+            // 道中回収は敵が攻撃可能な近傍なら自分から運搬状態にならず、入口への配置を続ける。
+            if (delivery >= 0 && danger[treasure.Cell] > 0f)
+            { ApproachAmbushPost(member, graph.Index(ambush.Post(member, graph.Terrain))); return; }
+            deliveryEntrances[member] = delivery;
             assigned[member] = true; pickupIds[member] = treasure.Id; longJobs[member] = false;
             goals[member] = treasure.Cell; reserved.Add(treasure.Cell); collectors++;
             tactics.SetAmbushPickup(members[member].CharacterId, true);
             Move(member, treasure.Cell);
+        }
+
+        /// <summary>担当入口への既知経路にある通常宝だけ選び、金宝や大きな寄り道を避ける。</summary>
+        private TreasureMemory SelectEnRouteTreasure(int member)
+        {
+            int entrance = graph.Index(ambush.TargetEntrance(member));
+            int direct = distances[member][entrance];
+            if (direct < 0) return null;
+            TreasureMemory best = null; float score = float.PositiveInfinity;
+            foreach (TreasureMemory treasure in treasures.Values)
+            {
+                if (treasure.Central || reserved.Contains(treasure.Cell) || Time.time - treasure.SeenAt > 0.25f) continue;
+                int pickup = distances[member][treasure.Cell], after = postDistances[treasure.Cell];
+                if (pickup < 0 || after < 0 || pickup > Mathf.Max(0, m_enRoutePickupSteps)
+                    || pickup + after > direct + Mathf.Max(0, m_enRouteExtraSteps)) continue;
+                if (pickup * 0.72f + after * 1.05f + 3f > 120f - (Time.time - startedAt)) continue;
+                float cost = pickup + after + (pickupIds[member] == treasure.Id ? -0.5f : 0f);
+                if (cost < score) { score = cost; best = treasure; }
+            }
+            return best;
+        }
+
+        /// <summary>道中回収で記憶した入口へ搬出。時間・接続の条件が崩れたら通常の帰還へ戻す。</summary>
+        private bool TryDeliverEnRoute(int member, int cell)
+        {
+            int entrance = deliveryEntrances[member];
+            if (entrance < 0) return false;
+            enRouteAllowed[member] = false; // 道中の回収は1回。搬出後に別の宝へ寄り道し続けない。
+            int distance = distances[member][entrance];
+            if (distance < 0 || danger[entrance] > 0f
+                || distance * 1.05f + 1.5f > 120f - (Time.time - startedAt))
+            { deliveryEntrances[member] = -1; return false; }
+            movementTargets[member] = entrance; movementFromCells[member] = cell; returnExits[member] = entrance;
+            m_memberStates[member] = "道中の宝を担当入口へ搬出中";
+            if (distance == 0) SXG_StopMember(member);
+            else
+            {
+                int next = graph.GuardNextStep(cell, entrance, distances[member], danger, -1);
+                SXG_SetMemberMoveTargetCell(member, graph.Cell(next >= 0 ? next : firstSteps[member][entrance]));
+            }
+            return true;
+        }
+
+        /// <summary>近接した相手に一度だけ拾わせる。出口から2歩以内は即搬出の危険があるため待たない。</summary>
+        private bool TryBeginEnemyPickupWait(int member, TreasureMemory treasure, IReadOnlyList<VisibleCharacterData> visible)
+        {
+            if (!m_waitForEnemyPickup || Time.time - treasure.SeenAt > 0.25f || baitTriedTreasure[member].Contains(treasure.Id)
+                || graph.ExitDistances[treasure.Cell] < 3) return false;
+            Vector3 mine = members[member].WorldPosition - treasure.Position; mine.y = 0f;
+            if (mine.sqrMagnitude > 5.0625f || distances[member][treasure.Cell] > 1) return false;
+            foreach (VisibleCharacterData enemy in visible)
+            {
+                if (tactics.IsFriend(enemy.CharacterId) || enemy.IsKnockedOut || enemy.HasTreasure
+                    || tactics.ThreatensCarrier(enemy.CharacterId)) continue;
+                Vector3 delta = enemy.WorldPosition - treasure.Position; delta.y = 0f;
+                if (delta.sqrMagnitude > 2.25f) continue; // 相手が宝から1.5ワールド単位以内。
+                graph.Search(graph.Index(enemy.CellPosition), baitDistances, baitFirst);
+                int steps = baitDistances[treasure.Cell];
+                if (steps < 0 || steps > 1) continue; // 壁越しの近さには反応しない。
+                baitEnemyIds[member] = enemy.CharacterId; baitTriedTreasure[member].Add(treasure.Id);
+                baitUntil[member] = Time.time + Mathf.Max(0.1f, m_enemyPickupWaitSeconds);
+                return HandleEnemyPickupWait(member, visible);
+            }
+            return false;
+        }
+
+        /// <summary>待ち時間と取得後1.2秒だけ同じ可視相手を扱う。見失えば隠れた位置を追わない。</summary>
+        private bool HandleEnemyPickupWait(int member, IReadOnlyList<VisibleCharacterData> visible)
+        {
+            if (baitEnemyIds[member] < 0) return false;
+            VisibleCharacterData target = null;
+            foreach (VisibleCharacterData enemy in visible)
+                if (enemy.CharacterId == baitEnemyIds[member]) { target = enemy; break; }
+            if (!m_waitForEnemyPickup || target == null || target.IsKnockedOut
+                || Time.time > baitUntil[member] + (target.HasTreasure ? 1.2f : 0f))
+            { baitEnemyIds[member] = -1; return false; }
+            int cell = graph.Index(target.CellPosition);
+            int distance = distances[member][cell];
+            if (distance < 0 || distance > 2)
+            { baitEnemyIds[member] = -1; return false; }
+            assigned[member] = true; pickupIds[member] = -1; movementTargets[member] = -1;
+            goals[member] = cell; reserved.Add(cell); tactics.SetAmbushPickup(members[member].CharacterId, false);
+            if (!target.HasTreasure)
+            {
+                tactics.SetPickupBait(members[member].CharacterId, target.CharacterId);
+                SXG_StopMember(member);
+                m_memberStates[member] = "近くの相手が宝を拾うのを短時間待機中";
+            }
+            else
+            {
+                // 宝を持った瞬間から攻撃対象に戻す。攻撃候補の射程/クールダウンはゲーム側に従う。
+                engaging[member] = true; engageUntil[member] = baitUntil[member] + 1.2f;
+                if (distance <= 1) SXG_SetMemberMoveTargetWorld(member, target.WorldPosition);
+                else Move(member, cell);
+                m_memberStates[member] = "先に拾わせた運搬者を迎撃中";
+            }
+            return true;
         }
 
         private int SelectAmbushFrontier(int member, float secondsLeft)
