@@ -270,6 +270,38 @@ namespace AriadneEntranceAmbush
             return nextStep >= 0;
         }
 
+        /// <summary>入口へ向かう既知経路。敵の近傍と詰まった最初の一歩を避け、遠回りは4歩まで。</summary>
+        internal int GuardNextStep(int start, int target, int[] shortest, float[] danger, int blocked)
+        {
+            if (start < 0 || start >= Size || target < 0 || target >= Size || shortest[target] < 1) return -1;
+            for (int i = 0; i < Size; i++)
+            { routeCost[i] = float.PositiveInfinity; routeFirst[i] = -1; routeSteps[i] = int.MaxValue; }
+            heapCount = 0; routeCost[start] = 0f; routeFirst[start] = start; routeSteps[start] = 0;
+            PushRoute(start, 0f);
+            int limit = shortest[target] + 4;
+            while (heapCount > 0)
+            {
+                PopRoute(out int current, out float cost);
+                if (cost != routeCost[current]) continue;
+                if (current == target) return routeFirst[current];
+                if (routeSteps[current] >= limit) continue;
+                for (int d = 0; d < 4; d++)
+                {
+                    int next = KnownNeighbor(current, d);
+                    // 完全未知の開拓終点に限り、既知セルの開口から1歩だけ許す。
+                    if (next < 0 && Neighbor(current, d) == target && !known[target]) next = target;
+                    if (next < 0) continue;
+                    // 通行不能と断定せず8歩相当の罰点。迂回路がなければ元の道を通れる。
+                    float score = cost + 1f + danger[next] * 0.6f + (current == start && next == blocked ? 8f : 0f);
+                    if (score >= routeCost[next]) continue;
+                    routeCost[next] = score; routeSteps[next] = routeSteps[current] + 1;
+                    routeFirst[next] = current == start ? next : routeFirst[current];
+                    PushRoute(next, score);
+                }
+            }
+            return -1; // 歩数制約内の候補がなければ呼び出し元のBFSへ戻す。
+        }
+
         // 帰還では両端が既知で、両方の開口が一致した隣接セルだけを通す。
         private int KnownNeighbor(int current, int direction)
         {

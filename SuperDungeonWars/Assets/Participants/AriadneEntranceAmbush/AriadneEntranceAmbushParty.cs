@@ -38,6 +38,11 @@ namespace AriadneEntranceAmbush
         private Vector3[] entryDirections;
         private int[] holdCells;
         private bool[] returningToHold;
+        // KO・押し戻し・短い迎撃の後は、宝や敵に釣られず配置を回復する。
+        private bool[] regroup, engaging;
+        private float[] engageUntil, progressAt, avoidUntil;
+        private Vector3[] progressPositions;
+        private int[] avoidedSteps, lastSteps;
         // 自部隊の公開観測を個人AIへ伝える連絡帳。部隊終了時に登録を解除する。
         private readonly AriadneTactics tactics = new AriadneTactics();
         private PartyMemberInfo[] members;
@@ -86,10 +91,10 @@ namespace AriadneEntranceAmbush
 
         protected override void SXG_OnPartyThink()
         {
-            // 仕事の選択は0.12秒ごと。周期の間にセルへ到着した場合は移動だけを即座に継続し、
+            // 待ち伏せ版の仕事の選択は0.06ゲーム内秒ごと。周期の間にセルへ到着した場合は移動だけを即座に継続し、
             // 到達済みセルへの命令を再送して立ち止まる時間をなくす。
             if (Time.time < nextThink) { ContinueMovesAtCellArrival(); return; }
-            nextThink = Time.time + 0.12f;
+            nextThink = Time.time + 0.06f;
             KnownMapView map = SXG_GetKnownMap();
             if (map == null) return;
             if (graph == null)
@@ -109,11 +114,14 @@ namespace AriadneEntranceAmbush
                 postDistances = new int[graph.Size]; postFirstSteps = new int[graph.Size];
                 holdPositions = new Vector3[count]; holdCells = new int[count];
                 entryDirections = new Vector3[count]; returningToHold = new bool[count];
+                regroup = new bool[count]; engaging = new bool[count]; engageUntil = new float[count];
+                progressAt = new float[count]; avoidUntil = new float[count]; progressPositions = new Vector3[count];
+                avoidedSteps = new int[count]; lastSteps = new int[count];
                 for (int i = 0; i < count; i++)
                 {
                     distances[i] = new int[graph.Size]; firstSteps[i] = new int[graph.Size]; goals[i] = -1; returnExits[i] = -1;
                     pickupIds[i] = -1;
-                    holdCells[i] = -1;
+                    holdCells[i] = -1; avoidedSteps[i] = lastSteps[i] = -1; regroup[i] = i > 0;
                 }
             }
             // 仲間の誰かが新しく観測した通路を取り込み、帰還距離も更新する。
@@ -125,12 +133,16 @@ namespace AriadneEntranceAmbush
                 // この判断で停止・ロック・別の仕事になった場合、古い移動を勝手に再開しない。
                 movementTargets[i] = -1;
                 SXG_TryGetMemberInfo(i, out members[i]);
+                // 搬出後も最初に担当入口の配置を回復してから迎撃・奪取へ戻る。
+                if (i > 0 && previous != null && previous.HasTreasure && members[i] != null && !members[i].HasTreasure)
+                { regroup[i] = true; engaging[i] = false; }
                 // 公開された前後の座標から、配置セルへ進入した向きだけを覚える。
                 // 原点やCellToWorld等のゲーム内部情報を使わず、セル境界から少し内側へ構えるため。
                 if (previous != null && members[i] != null && previous.IsMoving && !previous.IsKnockedOut
                     && !members[i].IsKnockedOut && previous.CurrentCell != members[i].CurrentCell)
                 {
-                    Vector3 entry = members[i].WorldPosition - previous.WorldPosition; entry.y = 0f;
+                    Vector2Int step = members[i].CurrentCell - previous.CurrentCell;
+                    Vector3 entry = new Vector3(step.x, 0f, step.y);
                     if (entry.sqrMagnitude > 0.0001f) entryDirections[i] = entry.normalized;
                 }
                 if (members[i] != null && !members[i].IsKnockedOut)
@@ -144,7 +156,14 @@ namespace AriadneEntranceAmbush
                 m_memberStates[i] = members[i] == null ? "メンバー未取得" : members[i].IsKnockedOut ? "KO中"
                     : members[i].IsActionLocked ? "行動ロック中" : members[i].HasTreasure ? "宝を搬出中"
                     : i == 0 ? "回収担当（中央・通常宝・探索）" : "入口へ配置中";
-                if (assigned[i]) continue;
+                if (assigned[i])
+                {
+                    if (i > 0 && members[i] != null && members[i].IsKnockedOut)
+                    { regroup[i] = true; engaging[i] = false; SXG_StopMember(i); }
+                    // ロック中の時間は「進路が詰まった時間」に数えない。
+                    progressAt[i] = Time.time;
+                    continue;
+                }
                 graph.Search(graph.Index(members[i].CurrentCell), distances[i], firstSteps[i]);
             }
             IReadOnlyList<VisibleCharacterData> visibleCharacters = SXG_GetVisibleCharacters();
@@ -302,6 +321,8 @@ namespace AriadneEntranceAmbush
                     continue;
                 }
                 int next = firstSteps[i][target];
+                if (i > 0 && !current.HasTreasure && !engaging[i])
+                    next = GuardStep(i, cell, target, next);
                 if (next >= 0) SXG_SetMemberMoveTargetCell(i, graph.Cell(next));
                 else SXG_StopMember(i);
             }
@@ -349,24 +370,47 @@ namespace AriadneEntranceAmbush
                 bool foraging = ambush.Update(i, nearPost, carrierNearPost, Time.time,
                     m_noCarrierWaitSeconds, m_nearbyCollectionSeconds);
 
-                // 敵の所持を一度は観測した宝が落ちたら、ON/OFFどちらでも回収・搬出する。
+                // 待機中のずれとKO復帰は専用状態へ。追跡中の移動を押し戻しと誤判定しない。
+                if (holdCells[i] == post && !engaging[i] && !foraging && pickupIds[i] < 0
+                    && holdDelta.sqrMagnitude > 0.36f)
+                    regroup[i] = true;
+                if (engaging[i] && Time.time >= engageUntil[i])
+                { engaging[i] = false; regroup[i] = true; }
+                if (regroup[i])
+                {
+                    ambush.ResetMember(i); engaging[i] = false;
+                    ApproachAmbushPost(i, post);
+                    // 元の待機点へ戻り切るまで、宝回収・追跡を再開しない。
+                    if (holdCells[i] == post && holdDelta.sqrMagnitude <= 0.01f
+                        && !members[i].IsMoving) regroup[i] = false;
+                    continue;
+                }
+                if (carrier != null)
+                {
+                    if (!engaging[i]) { engaging[i] = true; engageUntil[i] = Time.time + 1.2f; }
+                    assigned[i] = true; pickupIds[i] = -1; longJobs[i] = false;
+                    int cell = graph.Index(carrier.CellPosition);
+                    goals[i] = cell; reserved.Add(cell);
+                    m_memberStates[i] = "担当入口の運搬者へ接近・迎撃中（最大1.2秒で配置へ復帰）";
+                    // セル中心へ寄るだけでは横抜けされる。同セルと接続した隣セルは
+                    // 可視の実座標へ追従し、向きを相手へ合わせる。壁越しはBFSで除外済み。
+                    if (distances[i][cell] <= 1)
+                        SXG_SetMemberMoveTargetWorld(i, carrier.WorldPosition);
+                    else Move(i, cell);
+                    continue;
+                }
+                if (engaging[i])
+                {
+                    engaging[i] = false; regroup[i] = true;
+                    ApproachAmbushPost(i, post); continue;
+                }
+                // 運搬者を止める方を落下宝より優先。奪った宝も入口から2歩以内に限定する。
                 TreasureMemory loot = SelectAmbushTreasure(i, true, float.PositiveInfinity);
                 if (loot != null)
                 {
                     ambush.ResetMember(i);
                     IssueAmbushPickup(i, loot, ref collectors);
                     m_memberStates[i] = "敵が落とした宝を回収中 → 搬出後は入口へ戻る";
-                    continue;
-                }
-                if (carrier != null)
-                {
-                    assigned[i] = true; pickupIds[i] = -1; longJobs[i] = false;
-                    int cell = graph.Index(carrier.CellPosition);
-                    goals[i] = cell; reserved.Add(cell);
-                    m_memberStates[i] = "担当入口の可視運搬者を迎撃中（入口から2マス以内）";
-                    // 見えている相手へ接近して向きも合わせる。同セルでは観測した実座標を使う。
-                    if (cell == graph.Index(members[i].CurrentCell)) SXG_SetMemberMoveTargetWorld(i, carrier.WorldPosition);
-                    else Move(i, cell);
                     continue;
                 }
                 if (foraging)
@@ -389,7 +433,7 @@ namespace AriadneEntranceAmbush
             return true;
         }
 
-        /// <summary>入口そのものから2マス、担当から3マス以内の可視運搬者だけを迎撃する。</summary>
+        /// <summary>入口そのものから3マス、担当から4マス以内の可視運搬者だけを迎撃する。</summary>
         private VisibleCharacterData FindAmbushCarrier(int member, IReadOnlyList<VisibleCharacterData> visible, out bool nearPost)
         {
             nearPost = false;
@@ -400,10 +444,10 @@ namespace AriadneEntranceAmbush
             {
                 if (tactics.IsFriend(enemy.CharacterId) || enemy.IsKnockedOut || !enemy.HasTreasure) continue;
                 int cell = graph.Index(enemy.CellPosition);
-                if (cell < 0 || cell >= graph.Size || postDistances[cell] < 0 || postDistances[cell] > 2) continue;
+                if (cell < 0 || cell >= graph.Size || postDistances[cell] < 0 || postDistances[cell] > 3) continue;
                 nearPost = true;
                 int distance = distances[member][cell];
-                if (distance < 0 || distance > 3) continue;
+                if (distance < 0 || distance > 4) continue;
                 Vector3 delta = enemy.WorldPosition - members[member].WorldPosition; delta.y = 0f;
                 if (distance < bestDistance || (distance == bestDistance && delta.sqrMagnitude < bestWorldDistance))
                 { best = enemy; bestDistance = distance; bestWorldDistance = delta.sqrMagnitude; }
@@ -419,7 +463,7 @@ namespace AriadneEntranceAmbush
             {
                 if ((stolenOnly && !treasure.EnemyDrop) || reserved.Contains(treasure.Cell)) continue;
                 if (treasure.Cell < 0 || treasure.Cell >= graph.Size
-                    || postDistances[treasure.Cell] < 0 || postDistances[treasure.Cell] > 4) continue;
+                    || postDistances[treasure.Cell] < 0 || postDistances[treasure.Cell] > (stolenOnly ? 2 : 4)) continue;
                 if (!TryCollectionTime(member, treasure, out int distance, out float seconds) || distance > 4) continue;
                 // 切り替え期限には拾うまでの0.72秒/歩＋接触余裕0.5秒を収める。搬出は期限後も続ける。
                 if (distance * 0.72f + 0.5f > pickupSecondsLeft) continue;
@@ -454,6 +498,25 @@ namespace AriadneEntranceAmbush
             return best;
         }
 
+        /// <summary>0.9ゲーム内秒で0.15単位も進まなければ、同じ一歩を2秒間避ける。</summary>
+        private int GuardStep(int member, int cell, int target, int fallback)
+        {
+            SXG_TryGetMemberInfo(member, out PartyMemberInfo current);
+            if (current == null) return fallback;
+            Vector3 moved = current.WorldPosition - progressPositions[member]; moved.y = 0f;
+            if (moved.sqrMagnitude > 0.0225f)
+            { progressPositions[member] = current.WorldPosition; progressAt[member] = Time.time; }
+            else if (Time.time - progressAt[member] >= 0.9f)
+            {
+                avoidedSteps[member] = lastSteps[member]; avoidUntil[member] = Time.time + 2f;
+                progressAt[member] = Time.time;
+            }
+            int blocked = Time.time < avoidUntil[member] ? avoidedSteps[member] : -1;
+            int next = graph.GuardNextStep(cell, target, distances[member], danger, blocked);
+            lastSteps[member] = next >= 0 ? next : fallback;
+            return lastSteps[member];
+        }
+
         private void ApproachAmbushPost(int member, int post)
         {
             int previous = goals[member];
@@ -469,15 +532,8 @@ namespace AriadneEntranceAmbush
                 Move(member, post);
                 return;
             }
-            // 開拓先へ到着する前に毎回別の枝へ切り替えると往復しやすい。
-            // 未観測の目標までの既知経路が残っている間は、その1セルへの移動を完了させる。
-            if (previous >= 0 && graph.Frontiers.Contains(previous) && distances[member][previous] > 0)
-            {
-                goals[member] = previous; reserved.Add(previous);
-                m_memberStates[member] = $"入口への経路を探索中: {ambush.TargetEntrance(member)} / 開拓 {graph.Cell(previous)}";
-                Move(member, previous);
-                return;
-            }
+            // 未観測の枝でも、より短い開拓先が見つかれば更新する。
+            // 前回目標は1歩相当だけ優遇し、長い枝への無条件の固執を避ける。
             int target = -1;
             float best = float.PositiveInfinity;
             foreach (int frontier in graph.Frontiers)
@@ -485,8 +541,8 @@ namespace AriadneEntranceAmbush
                 int distance = distances[member][frontier];
                 if (distance < 1) continue;
                 // 敵側入口は位置だけが公開。実経路は未観測セルの手前まで開拓して探す。
-                float score = distance * 0.65f + graph.Manhattan(frontier, post) + (reserved.Contains(frontier) ? 2f : 0f);
-                if (previous == frontier) score *= 0.85f;
+                float score = distance + graph.Manhattan(frontier, post) + (reserved.Contains(frontier) ? 2f : 0f);
+                if (previous == frontier) score -= 1f;
                 if (score < best) { best = score; target = frontier; }
             }
             goals[member] = target;
@@ -497,15 +553,17 @@ namespace AriadneEntranceAmbush
             else SXG_StopMember(member);
         }
 
-        /// <summary>進入方向へ0.12単位入った待機点を作り、0.1単位以上押されたら0.06単位以内まで戻る。</summary>
+        /// <summary>進入方向へ0.85単位入った待機点を作り、0.1単位以上押されたら0.06単位以内まで戻る。</summary>
         private void HoldAmbushPost(int member, int post)
         {
+            // 意図した待機時間は、移動経路が詰まった時間から除外する。
+            progressAt[member] = Time.time; progressPositions[member] = members[member].WorldPosition;
             if (holdCells[member] != post)
             {
                 holdCells[member] = post;
-                // セルへ入った瞬間の位置は境界に近い。0.12ワールド単位（間隔2なら0.06マス）だけ
+                // セルへ入った瞬間の位置は境界に近い。0.85ワールド単位（間隔2なら0.425マス）だけ
                 // 観測した進入方向へ進め、戻るときの停止誤差で隣セルに残るのを避ける。
-                holdPositions[member] = members[member].WorldPosition + entryDirections[member] * 0.12f;
+                holdPositions[member] = members[member].WorldPosition + entryDirections[member] * 0.85f;
                 returningToHold[member] = true;
             }
             Vector3 delta = holdPositions[member] - members[member].WorldPosition; delta.y = 0f;
@@ -838,6 +896,8 @@ namespace AriadneEntranceAmbush
             if (graph.Index(members[member].CurrentCell) != target)
             {
                 int next = firstSteps[member][target];
+                if (member > 0 && !members[member].HasTreasure && !engaging[member])
+                    next = GuardStep(member, graph.Index(members[member].CurrentCell), target, next);
                 if (next >= 0) SXG_SetMemberMoveTargetCell(member, graph.Cell(next));
                 return;
             }

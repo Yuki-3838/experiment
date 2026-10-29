@@ -10,7 +10,7 @@ namespace AriadneEntranceAmbush
     public sealed class AriadneEntranceAmbushCharacter : ComCharacterBase
     {
         /// <summary>
-        /// ゲーム側が渡す攻撃可能な候補から、護衛対象への脅威、敵運搬者、通常敵の順に選ぶ。
+        /// ゲーム側が渡す攻撃可能な候補から、敵運搬者、護衛対象への脅威、密着した通常敵の順に選ぶ。
         /// 返す値はキャラクターIDではなく、candidates内の添字。-1なら攻撃しない。
         /// </summary>
         protected override int SXG_ChooseAttackTargetIndex(IReadOnlyList<VisibleCharacterData> candidates)
@@ -28,12 +28,16 @@ namespace AriadneEntranceAmbush
                 // 気絶した敵への追撃は起き上がり待ちに時間を使うため行わない。
                 bool defense = AriadneTactics.IsDefenseTarget(SXG_CharacterId, enemy.CharacterId);
                 if (enemy.IsKnockedOut) continue;
-                // 護衛を2、宝の奪取を1、通常敵を0として比較する。距離の単位とは混ぜない。
-                int priority = (defense ? 2 : 0) + (enemy.HasTreasure ? 1 : 0);
+                // 運搬者3、護衛2、通常敵0の優先度。距離の単位とは混ぜない。
+                int priority = enemy.HasTreasure ? 3 : defense ? 2 : 0;
 
                 // 比較だけなので平方根は不要。二乗距離のまま最も近い候補を選ぶ。
                 Vector3 delta = enemy.WorldPosition - SXG_WorldPosition; delta.y = 0;
                 float d = delta.sqrMagnitude;
+                // 入口役は通常敵の攻撃で0.7秒ずつ足を止め続けない。密着0.65単位以内は反撃する。
+                // 回収/奪取中と護衛対象への脅威は従来通り。運搬者は常に最優先。
+                if (SXG_MemberIndex > 0 && !enemy.HasTreasure && !defense && d > 0.4225f
+                    && AriadneTactics.TryGetAmbushPickup(SXG_CharacterId, out bool allowed) && !allowed) continue;
                 if (priority > bestPriority || (priority == bestPriority && d < distance))
                 { bestPriority = priority; distance = d; best = i; }
             }
