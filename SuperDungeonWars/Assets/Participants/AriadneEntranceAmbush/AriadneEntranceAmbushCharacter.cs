@@ -36,7 +36,7 @@ namespace AriadneEntranceAmbush
                 // 比較だけなので平方根は不要。二乗距離のまま最も近い候補を選ぶ。
                 Vector3 delta = enemy.WorldPosition - SXG_WorldPosition; delta.y = 0;
                 float d = delta.sqrMagnitude;
-                // 入口役は通常敵の攻撃で0.7秒ずつ足を止め続けない。密着0.65単位以内は反撃する。
+                // 入口役は通常敵への攻撃で足を止め続けない（配布ルールの動作ロックは1.5秒）。密着0.65単位以内は反撃する。
                 // 回収/奪取中と護衛対象への脅威は従来通り。運搬者は常に最優先。
                 if (SXG_MemberIndex > 0 && !enemy.HasTreasure && !defense && d > 0.4225f
                     && AriadneTactics.TryGetAmbushPickup(SXG_CharacterId, out bool allowed) && !allowed) continue;

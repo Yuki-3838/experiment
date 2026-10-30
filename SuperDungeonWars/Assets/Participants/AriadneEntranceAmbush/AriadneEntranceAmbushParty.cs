@@ -4,7 +4,7 @@ using UnityEngine;
 namespace AriadneEntranceAmbush
 {
     /// <summary>
-    /// 3入口分担版（2026-10-30調整）。基本は3入口の担当と回収1人。金未確保時は入口役1人を回収補助へ回す。
+    /// 3入口分担・妥協案比較版（2026-10-30）。自陣以外の3入口を1人ずつ守り、残る1人が回収する。
     /// 通常のParty0004838Partyとは別のParty・Character用Prefabとして選ぶ。
     /// 判断材料は公開観測とその回転推定。非公開の生成済み迷路やシードは参照しない。
     /// </summary>
@@ -39,9 +39,6 @@ namespace AriadneEntranceAmbush
         [InspectorName("拾わせて待つ時間（秒）")]
         [Tooltip("相手が宝を拾うのを待つゲーム内秒。初期0.8秒。同じ宝では1回だけ。")]
         [Min(0.1f)] [SerializeField] private float m_enemyPickupWaitSeconds = 0.8f;
-        [InspectorName("金宝箱を確保できていない時に回収補助を1人出す")]
-        [Tooltip("35ゲーム内秒以後、金が運ばれたのを観測し自部隊が未搬出なら、遠い担当入口の1人を回収へ。運搬者が担当入口へ来たら戻る。")]
-        [SerializeField] private bool m_economicSupportWhenGoldMissing = true;
         [Header("現在の担当（実行中の診断表示）")]
         [Tooltip("観測と自分の命令だけによる表示。経路探索中と、入口へ到着して待機中を区別する。")]
         [SerializeField] private string[] m_memberStates;
@@ -73,11 +70,10 @@ namespace AriadneEntranceAmbush
         // 最後に選んだ移動の目的地と、その経路を指示したセル。判断待ちの間の継続にだけ使う。
         private int[] movementTargets, movementFromCells;
         private bool hasObservedDanger;
-        private int economicSupport = -1;
-        // 金宝箱の可視運搬者に限って入口役1人を先回りへ出す。隠れた位置は追わない。
-        private int visibleGoldCarrier = -1, goldHunter = -1, goldEnemy = -1;
-        private float goldUntil, goldRestUntil;
-        private int[] goldEnemyDistance, goldEnemyFirst, goldExitDistance, goldExitFirst;
+        // 初期4人の公開セル/実座標からグリッド原点を校正。内部CellToWorldや実迷路は読まない。
+        private Vector3 observedWorldOrigin;
+        private bool observedWorldBoundsKnown;
+        private int clampedWorldTargets;
         // 道中で拾う宝だけ担当入口を記憶。KO・搬出・到達不能・時間不足なら解除する。
         private int[] deliveryEntrances, baitEnemyIds;
         private HashSet<int>[] baitTriedTreasure;
@@ -146,8 +142,6 @@ namespace AriadneEntranceAmbush
                 distances = new int[count][]; firstSteps = new int[count][];
                 goals = new int[count]; assigned = new bool[count];
                 danger = new float[graph.Size]; returnExits = new int[count];
-                goldEnemyDistance = new int[graph.Size]; goldEnemyFirst = new int[graph.Size];
-                goldExitDistance = new int[graph.Size]; goldExitFirst = new int[graph.Size];
                 pickupIds = new int[count]; longJobs = new bool[count];
                 m_memberStates = new string[count];
                 ambush = new AriadneAmbush(count, map.Width, map.Height);
@@ -208,6 +202,7 @@ namespace AriadneEntranceAmbush
                 }
                 graph.Search(graph.Index(members[i].CurrentCell), distances[i], firstSteps[i]);
             }
+            ObserveWorldBounds();
             IReadOnlyList<VisibleCharacterData> visibleCharacters = SXG_GetVisibleCharacters();
             tactics.Refresh(members, visibleCharacters, map);
             hasObservedDanger = RefreshDanger(visibleCharacters);
@@ -257,7 +252,6 @@ namespace AriadneEntranceAmbush
             }
             // 入口担当を先に確保する。切り替え回収もここで完結し、回収担当0の仕事を奪わない。
             bool ambushActive = AssignEntranceAmbush(map, visibleCharacters, ref collectors);
-            AssignGoldRaid(visibleCharacters, ref collectors);
             // 金宝箱は通常の距離・効率比較へ埋もれさせず、手ぶらの中央担当を先に1人確保する。
             AssignCentralObjective(ref collectors);
             // 中央担当以外は、4歩以内かつ回収・搬出24秒以内の宝を探索より先に確保する。
@@ -362,7 +356,7 @@ namespace AriadneEntranceAmbush
                     // 目的地の宝へは観測済みの実座標で接触を続ける。待ち伏せ地点等への到着は停止する。
                     if (!current.HasTreasure && treasures.TryGetValue(pickupIds[i], out TreasureMemory treasure)
                         && treasure.Cell == target)
-                        SXG_SetMemberMoveTargetWorld(i, treasure.Position);
+                        MoveWorld(i, treasure.Position);
                     else SXG_StopMember(i);
                     continue;
                 }
@@ -372,122 +366,6 @@ namespace AriadneEntranceAmbush
                 if (next >= 0) SXG_SetMemberMoveTargetCell(i, graph.Cell(next));
                 else SXG_StopMember(i);
             }
-        }
-
-        /// <summary>得点は読まず、自部隊の搬出フックと観測した金の所持状態から回収不足を補う。</summary>
-        private bool ShouldSupportCollection(int member, bool carrierNearPost)
-        {
-            if (!m_economicSupportWhenGoldMissing || tactics.CentralExported || !centralCarried
-                || Time.time - startedAt < 35f || carrierNearPost || engaging[member]) return false;
-            // 自分たちが金を搬出しようとしている間は、入口配置を崩さない。
-            foreach (VisibleTreasureData treasure in SXG_GetVisibleTreasures())
-                if (treasure.TreasureType == TreasureType.CentralChest && treasure.IsCarried
-                    && tactics.IsFriend(treasure.OwnerCharacterId)) return false;
-            if (economicSupport < 0)
-            {
-                int longest = -1;
-                for (int i = 1; i < members.Length; i++)
-                {
-                    if (members[i] == null || members[i].IsKnockedOut || members[i].HasTreasure) continue;
-                    int post = graph.Index(ambush.Post(i, graph.Terrain));
-                    int distance = distances[i][post];
-                    if (distance > longest) { longest = distance; economicSupport = i; }
-                }
-            }
-            // KO後に配置へ復帰している人は回収補助へ流さない。
-            return member == economicSupport && (enRouteAllowed[member] || !regroup[member]);
-        }
-
-        /// <summary>可視の金運搬者へ入口役1人だけを最長4秒派遣。落下後は拾得を優先する。</summary>
-        private void AssignGoldRaid(IReadOnlyList<VisibleCharacterData> visible, ref int collectors)
-        {
-            if (Time.time < goldRestUntil) return;
-            VisibleCharacterData carrier = null;
-            foreach (VisibleCharacterData enemy in visible)
-                if (enemy.CharacterId == visibleGoldCarrier && enemy.HasTreasure && !enemy.IsKnockedOut) carrier = enemy;
-            TreasureMemory fallen = null;
-            foreach (TreasureMemory treasure in treasures.Values)
-                if (treasure.Central && treasure.EnemyDrop) { fallen = treasure; break; }
-            if (carrier == null && fallen == null)
-            { goldHunter = goldEnemy = -1; return; }
-            // 金が落ちた後の接触取得には別に3ゲーム内秒を確保する。各段階で延長は1回だけ。
-            if (carrier == null && fallen != null && goldEnemy >= 0)
-            { goldEnemy = -1; goldUntil = Time.time + 3f; }
-            if (goldHunter >= 0 && Time.time > goldUntil)
-            {
-                engaging[goldHunter] = false; regroup[goldHunter] = true;
-                goldHunter = goldEnemy = -1; goldRestUntil = Time.time + 3f;
-                return;
-            }
-            int bestMember = -1, bestCell = -1; float best = float.PositiveInfinity;
-            if (carrier != null)
-            {
-                int start = graph.Index(carrier.CellPosition);
-                graph.Search(start, goldEnemyDistance, goldEnemyFirst);
-                // 相対チーム番号と公開の4辺中央から出発口を予測する。命令や非公開地形は読まない。
-                if (!SXG_TryGetReturnEntranceCell(out Vector2Int predicted)) return;
-                for (int turn = 0; turn < carrier.TeamIndex; turn++)
-                    predicted = new Vector2Int(predicted.y, graph.Terrain.Width - 1 - predicted.x);
-                int exit = graph.Index(predicted);
-                if (goldEnemyDistance[exit] < 0) exit = graph.ClosestExit(goldEnemyDistance);
-                if (exit < 0) return;
-                graph.Search(exit, goldExitDistance, goldExitFirst);
-                int trip = goldEnemyDistance[exit];
-                for (int i = 1; i < members.Length; i++)
-                {
-                    PartyMemberInfo member = members[i];
-                    if (member == null || member.IsKnockedOut || member.IsActionLocked || member.HasTreasure
-                        || (regroup[i] && holdCells[i] >= 0)) continue;
-                    for (int cell = 0; cell < graph.Size; cell++)
-                    {
-                        int ours = distances[i][cell], theirs = goldEnemyDistance[cell];
-                        if (ours < 0 || ours > 6 || theirs < 0 || goldExitDistance[cell] < 0
-                            || theirs + goldExitDistance[cell] != trip) continue;
-                        float arrival = ours * 0.72f, enemyArrival = theirs * 1.05f;
-                        if (arrival > enemyArrival + 0.4f || Mathf.Max(arrival, enemyArrival) > 4f) continue;
-                        float score = Mathf.Max(arrival, enemyArrival) + arrival * 0.1f;
-                        if (i == goldHunter) score *= 0.85f;
-                        if (score < best) { best = score; bestMember = i; bestCell = cell; }
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 1; i < members.Length; i++)
-                {
-                    PartyMemberInfo member = members[i];
-                    if (member == null || member.IsKnockedOut || member.IsActionLocked || member.HasTreasure
-                        || (regroup[i] && holdCells[i] >= 0)) continue;
-                    if (!TryCollectionTime(i, fallen, out int distance, out _) || distance > 6) continue;
-                    if (distance < best) { best = distance; bestMember = i; bestCell = fallen.Cell; }
-                }
-            }
-            if (bestMember < 0) return;
-            if (goldHunter < 0 || (carrier != null && goldEnemy != carrier.CharacterId)) goldUntil = Time.time + 4f;
-            goldHunter = bestMember; goldEnemy = carrier != null ? carrier.CharacterId : -1;
-            assigned[bestMember] = true; longJobs[bestMember] = false;
-            goals[bestMember] = bestCell; reserved.Add(bestCell);
-            if (fallen != null && carrier == null)
-            {
-                pickupIds[bestMember] = fallen.Id;
-                tactics.SetAmbushPickup(members[bestMember].CharacterId, true);
-                m_memberStates[bestMember] = "迎撃で落ちた金宝箱を確保中";
-                Move(bestMember, bestCell);
-            }
-            else
-            {
-                pickupIds[bestMember] = -1; tactics.SetAmbushPickup(members[bestMember].CharacterId, false);
-                engaging[bestMember] = true; engageUntil[bestMember] = goldUntil;
-                m_memberStates[bestMember] = "可視の金運搬者へ先回り中（入口役1人・最長4秒）";
-                int enemyCell = graph.Index(carrier.CellPosition);
-                if (bestCell == enemyCell && distances[bestMember][enemyCell] <= 1)
-                    SXG_SetMemberMoveTargetWorld(bestMember, carrier.WorldPosition);
-                else Move(bestMember, bestCell);
-            }
-            // 入口の一時回収を上書きした場合も、人数を重複して数えない。
-            collectors = 0;
-            for (int i = 0; i < members.Length; i++)
-                if (members[i] != null && (members[i].HasTreasure || (assigned[i] && pickupIds[i] >= 0))) collectors++;
         }
 
         /// <summary>入口役を先に割り当て、残りのメンバー0だけを通常の回収処理へ渡す。</summary>
@@ -512,7 +390,7 @@ namespace AriadneEntranceAmbush
             for (int i = 0; i < members.Length; i++)
             {
                 if (!ambush.IsAmbusher(i) || members[i] == null) continue;
-                // 待機中は道中の通常宝を拾わない。奪取・一時回収・回収補助の間に取得を許可する。
+                // 待機中は道中の通常宝を拾わない。奪取・切り替え回収の間だけ取得を許可する。
                 tactics.SetAmbushPickup(members[i].CharacterId, false);
                 if (assigned[i])
                 {
@@ -536,15 +414,6 @@ namespace AriadneEntranceAmbush
                         IssueAmbushPickup(i, onWay, visible, ref collectors, graph.Index(ambush.TargetEntrance(i)));
                         continue;
                     }
-                }
-                // 空の入口で得点差を広げられないよう、金を未確保の局面だけ回収者を補う。
-                // 入口の担当自体は保持し、可視運搬者が来れば通常の迎撃・復帰へ戻す。
-                if (ShouldSupportCollection(i, carrierNearPost))
-                {
-                    assigned[i] = false;
-                    tactics.SetAmbushPickup(members[i].CharacterId, true);
-                    m_memberStates[i] = "金未確保のため入口役1人が回収補助中";
-                    continue;
                 }
                 // 「隣のセルにいる」では到着扱いにしない。配置セルで止まって初めて待機を計時する。
                 Vector3 holdDelta = holdPositions[i] - members[i].WorldPosition; holdDelta.y = 0f;
@@ -585,11 +454,11 @@ namespace AriadneEntranceAmbush
                     assigned[i] = true; pickupIds[i] = -1; longJobs[i] = false;
                     int cell = graph.Index(carrier.CellPosition);
                     goals[i] = cell; reserved.Add(cell);
-                    m_memberStates[i] = "担当入口の運搬者へ接近・迎撃中（最大2.4秒で配置へ復帰）";
+                    m_memberStates[i] = "担当入口の運搬者へ接近・迎撃中（最大1.2秒で配置へ復帰）";
                     // セル中心へ寄るだけでは横抜けされる。同セルと接続した隣セルは
                     // 可視の実座標へ追従し、向きを相手へ合わせる。壁越しはBFSで除外済み。
                     if (distances[i][cell] <= 1)
-                        SXG_SetMemberMoveTargetWorld(i, carrier.WorldPosition);
+                        MoveWorld(i, carrier.WorldPosition);
                     else Move(i, cell);
                     continue;
                 }
@@ -774,7 +643,7 @@ namespace AriadneEntranceAmbush
             {
                 // 宝を持った瞬間から攻撃対象に戻す。攻撃候補の射程/クールダウンはゲーム側に従う。
                 engaging[member] = true; engageUntil[member] = baitUntil[member] + 1.2f;
-                if (distance <= 1) SXG_SetMemberMoveTargetWorld(member, target.WorldPosition);
+                if (distance <= 1) MoveWorld(member, target.WorldPosition);
                 else Move(member, cell);
                 m_memberStates[member] = "先に拾わせた運搬者を迎撃中";
             }
@@ -863,7 +732,7 @@ namespace AriadneEntranceAmbush
                 holdCells[member] = post;
                 // セルへ入った瞬間の位置は境界に近い。0.85ワールド単位（間隔2なら0.425マス）だけ
                 // 観測した進入方向へ進め、戻るときの停止誤差で隣セルに残るのを避ける。
-                holdPositions[member] = members[member].WorldPosition + entryDirections[member] * 0.85f;
+                holdPositions[member] = LimitWorldTarget(members[member].WorldPosition + entryDirections[member] * 0.85f);
                 returningToHold[member] = true;
             }
             Vector3 delta = holdPositions[member] - members[member].WorldPosition; delta.y = 0f;
@@ -874,7 +743,7 @@ namespace AriadneEntranceAmbush
             if (returningToHold[member])
             {
                 m_memberStates[member] = $"入口の待機位置へ戻り中: {ambush.TargetEntrance(member)} / 配置 {graph.Cell(post)}";
-                SXG_SetMemberMoveTargetWorld(member, holdPositions[member]);
+                MoveWorld(member, holdPositions[member]);
             }
             else
             {
@@ -1135,7 +1004,7 @@ namespace AriadneEntranceAmbush
             // 同じセル内では、観測した敵の座標へ寄って攻撃開始範囲へ入る。
             // 別セルでは通常の経路指示を使い、壁越しの直線追跡をしない。
             if (graph.Index(members[member].CurrentCell) == target)
-                SXG_SetMemberMoveTargetWorld(member, enemy.WorldPosition);
+                MoveWorld(member, enemy.WorldPosition);
             else Move(member, target);
         }
 
@@ -1147,7 +1016,6 @@ namespace AriadneEntranceAmbush
         private void RememberTreasures()
         {
             IReadOnlyList<VisibleTreasureData> visible = SXG_GetVisibleTreasures();
-            visibleGoldCarrier = -1;
             expired.Clear();
             foreach (KeyValuePair<int, TreasureMemory> pair in treasures)
             {
@@ -1168,11 +1036,7 @@ namespace AriadneEntranceAmbush
             for (int i = 0; i < visible.Count; i++)
             {
                 VisibleTreasureData t = visible[i];
-                if (t.TreasureType == TreasureType.CentralChest)
-                {
-                    centralCarried = t.IsCarried;
-                    if (t.IsCarried && !tactics.IsFriend(t.OwnerCharacterId)) visibleGoldCarrier = t.OwnerCharacterId;
-                }
+                if (t.TreasureType == TreasureType.CentralChest) centralCarried = t.IsCarried;
                 if (t.IsCarried && t.OwnerCharacterId >= 0 && !tactics.IsFriend(t.OwnerCharacterId))
                     enemyCarriedIds.Add(t.TreasureId);
                 // 所有者にかかわらず、運ばれている宝は落ちている宝の回収候補に含めない。
@@ -1194,6 +1058,41 @@ namespace AriadneEntranceAmbush
         /// 選んだ目標までの最初の1マスだけを指示する。
         /// 次の思考で観測情報と現在位置を見直し、経路を更新する。
         /// </summary>
+        private void ObserveWorldBounds()
+        {
+            if (observedWorldBoundsKnown || members.Length != 4) return;
+            Vector3 origin = Vector3.zero;
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (members[i] == null || members[i].IsKnockedOut
+                    || members[i].CurrentCell != members[0].CurrentCell) return;
+                // 配布のセル間隔は2単位。初期4人の対称配置のずれを平均で相殺する。
+                Vector2Int cell = members[i].CurrentCell;
+                origin += members[i].WorldPosition - new Vector3(cell.x * 2f, 0f, cell.y * 2f);
+            }
+            observedWorldOrigin = origin / members.Length;
+            observedWorldBoundsKnown = true;
+        }
+
+        private Vector3 LimitWorldTarget(Vector3 target)
+        {
+            if (!observedWorldBoundsKnown) return target;
+            // 外周セル中心から半セル=1単位、さらに0.05単位内側まで。吹き飛んだ相手へ場外追跡しない。
+            target.x = Mathf.Clamp(target.x, observedWorldOrigin.x - 0.95f,
+                observedWorldOrigin.x + (graph.Terrain.Width - 1) * 2f + 0.95f);
+            target.z = Mathf.Clamp(target.z, observedWorldOrigin.z - 0.95f,
+                observedWorldOrigin.z + (graph.Terrain.Height - 1) * 2f + 0.95f);
+            return target;
+        }
+
+        private void MoveWorld(int member, Vector3 target)
+        {
+            if (!observedWorldBoundsKnown) { SXG_StopMember(member); return; }
+            Vector3 legal = LimitWorldTarget(target);
+            if (Mathf.Abs(legal.x - target.x) > 0.0001f || Mathf.Abs(legal.z - target.z) > 0.0001f) clampedWorldTargets++;
+            SXG_SetMemberMoveTargetWorld(member, legal);
+        }
+
         private void Move(int member, int target)
         {
             movementTargets[member] = target;
@@ -1210,7 +1109,7 @@ namespace AriadneEntranceAmbush
             // 同じセルまで来たら観測したワールド座標へ近づき、接触による取得を狙う。
             if (!members[member].HasTreasure && treasures.TryGetValue(pickupIds[member], out TreasureMemory treasure)
                 && treasure.Cell == target)
-            { SXG_SetMemberMoveTargetWorld(member, treasure.Position); return; }
+            { MoveWorld(member, treasure.Position); return; }
             SXG_StopMember(member);
         }
     }
